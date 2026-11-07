@@ -4,7 +4,9 @@ A small World of Warcraft: Forever addon that shows an icon for every important 
 
 ## Install
 
-Copy this folder to `World of Warcraft\_forever_\Interface\AddOns\ForeverBuffs` (the folder must contain `ForeverBuffs.toc`). Reload the UI or log in.
+**With WowUp (gets updates automatically):** in WowUp pick your Forever installation, choose *Get Addons > Install from URL*, paste `https://github.com/colinz-severed/ForeverBuffs` and click Install. WowUp then offers each new release as an update.
+
+**By hand:** download the latest `ForeverBuffs-vX.Y.Z.zip` from the [Releases page](https://github.com/colinz-severed/ForeverBuffs/releases), and extract it into `World of Warcraft\_forever_\Interface\AddOns\` so that you end up with `...\AddOns\ForeverBuffs\ForeverBuffs.toc`. Reload the UI or log in.
 
 ## Commands
 
