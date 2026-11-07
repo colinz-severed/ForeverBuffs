@@ -13,7 +13,7 @@ local Data = FB.Data
 --   key, name, class (nil = consumable), learnLevel, selfOnly, kind ("aura" |
 --   "weaponEnchant"), castIDs (default = ids), ids, nameMatch, iconSpells
 --   (first known wins, else last), defaultEnabled, defaultEnabledByClass,
---   quietFromOthers, mustBeOwn, slot, requiresOffhandWeapon, consumable,
+--   mustBeOwn, slot, requiresOffhandWeapon, consumable,
 --   excludeClasses, minLevel.
 -------------------------------------------------------------------------------
 
@@ -33,7 +33,6 @@ local function E(t)
   t.ids = t.ids or {}
   if t.defaultEnabled == nil then t.defaultEnabled = true end
   t.selfOnly = t.selfOnly or false
-  t.quietFromOthers = t.quietFromOthers or false
   t.mustBeOwn = t.mustBeOwn or false
   t.consumable = t.consumable or false
   t.requiresOffhandWeapon = t.requiresOffhandWeapon or false
@@ -101,7 +100,7 @@ Data.entries = {
              20217, 25898 },                                                  -- Kings
              -- Salvation (1038, 25895) and Light (19977-19979, 25890) do not exist on Forever
      iconSpells = { 20217, 19740 } },
-  E{ key = "battle_shout", name = "Battle Shout", class = "WARRIOR", learnLevel = 1, quietFromOthers = true,
+  E{ key = "battle_shout", name = "Battle Shout", class = "WARRIOR", learnLevel = 1,
      ids = { 6673, 5242, 6192, 11549, 11550, 11551, 25289 }, iconSpells = { 6673 } },
 
   ---------------------------------------------------------------------------
@@ -110,8 +109,8 @@ Data.entries = {
   E{ key = "flask", name = "Flask", consumable = true, minLevel = 50,
      ids = { 17626, 17627, 17628, 17629 }, iconSpells = { 17626 } },
   E{ key = "elixir", name = "Elixir", consumable = true,
-     ids = { 17538, 17539, 11474, 26276, 11390, 3593, 11348, 11349, 11405, 11334, 11406, 21920, 17535, 11396,
-             24363, 24361, 17537, 2367, 3164, 11328 },
+     ids = { 17538, 17539, 11474, 26276, 11390, 3593, 11348, 11349, 11405, 11334, 11406, 21920, 11396,
+             24363, 17537, 2367, 3164, 11328 },
      iconSpells = { 17538 } },
   E{ key = "well_fed", name = "Well Fed", consumable = true, nameMatch = "Well Fed",
      ids = { 19705, 19706, 19708, 19709, 19710, 19711, 24799, 24870, 25661, 18192, 18194, 18222, 22730, 25941 },
@@ -128,90 +127,142 @@ Data.byKey = {}
 for _, e in ipairs(Data.entries) do Data.byKey[e.key] = e end
 
 -------------------------------------------------------------------------------
--- Recommended consumables by role and level (Classic item IDs).
--- Rows: { level=, itemID=, name=, classes=set|nil, weapon="edged"|"blunt"|nil }
+-- Priorities
+-------------------------------------------------------------------------------
+Data.PRIORITIES = { "high", "normal", "low" }
+function Data.DefaultPriority(reason)
+  if reason == "known" then return "normal" end
+  return "low"
+end
+
+-------------------------------------------------------------------------------
+-- Consumables catalogue (Classic item IDs, which Forever keeps).
+-- Row: { itemID, name, level (required level), summary, roles=set|nil
+--        (recommended for these roles; nil = listed only), classes=set|nil,
+--        weapon="edged"|"blunt"|"oil"|nil, auraIDs={...} }
+-- Aura IDs are best-effort: presence is checked against the whole category,
+-- so a wrong mapping cannot cause a false reminder as long as the ID exists.
 -------------------------------------------------------------------------------
 local function set(...) local s = {}; for i = 1, select("#", ...) do s[select(i, ...)] = true end; return s end
+local CASTER_HEALER = set("Caster", "Healer")
+local MELEE_TANK = set("Melee", "Tank")
 
-local STONES_EDGED = {
-  { level = 1,  itemID = 2862,  name = "Rough Sharpening Stone", weapon = "edged" },
-  { level = 10, itemID = 2863,  name = "Coarse Sharpening Stone", weapon = "edged" },
-  { level = 20, itemID = 2871,  name = "Heavy Sharpening Stone", weapon = "edged" },
-  { level = 35, itemID = 7964,  name = "Solid Sharpening Stone", weapon = "edged" },
-  { level = 45, itemID = 12404, name = "Dense Sharpening Stone", weapon = "edged" },
-  { level = 50, itemID = 18262, name = "Elemental Sharpening Stone", weapon = "edged" },
-}
-local STONES_BLUNT = {
-  { level = 1,  itemID = 3239,  name = "Rough Weightstone", weapon = "blunt" },
-  { level = 10, itemID = 3240,  name = "Coarse Weightstone", weapon = "blunt" },
-  { level = 20, itemID = 3241,  name = "Heavy Weightstone", weapon = "blunt" },
-  { level = 35, itemID = 7965,  name = "Solid Weightstone", weapon = "blunt" },
-  { level = 45, itemID = 12643, name = "Dense Weightstone", weapon = "blunt" },
-}
-local function concat(...)
-  local out = {}
-  for i = 1, select("#", ...) do for _, row in ipairs((select(i, ...))) do out[#out + 1] = row end end
-  return out
-end
-local OILS = {
-  { level = 5,  itemID = 20744, name = "Minor Wizard Oil" },
-  { level = 20, itemID = 20745, name = "Minor Mana Oil" },
-  { level = 30, itemID = 20746, name = "Lesser Wizard Oil" },
-  { level = 35, itemID = 20747, name = "Lesser Mana Oil" },
-  { level = 40, itemID = 20750, name = "Wizard Oil" },
-}
-local WEAPON_CASTER = concat(OILS, { { level = 45, itemID = 20749, name = "Brilliant Wizard Oil" } })
-local WEAPON_HEALER = concat(OILS, { { level = 45, itemID = 20748, name = "Brilliant Mana Oil" } })
-local WEAPON_MELEE = concat(STONES_EDGED, STONES_BLUNT)
+local function R(t) t.auraIDs = t.auraIDs or {}; return t end
 
-Data.RECOMMEND = {
+Data.CATALOGUE = {
   elixir = {
-    Caster = {
-      { level = 33, itemID = 6373,  name = "Elixir of Firepower", classes = set("MAGE") },
-      { level = 37, itemID = 9155,  name = "Arcane Elixir" },
-      { level = 40, itemID = 9264,  name = "Elixir of Shadow Power", classes = set("WARLOCK", "PRIEST") },
-      { level = 47, itemID = 13454, name = "Greater Arcane Elixir" },
-      { level = 50, itemID = 21546, name = "Elixir of Greater Firepower", classes = set("MAGE") },
-    },
-    Melee = {
-      { level = 5,  itemID = 2454,  name = "Elixir of Lion's Strength" },
-      { level = 20, itemID = 3391,  name = "Elixir of Ogre's Strength" },
-      { level = 27, itemID = 8949,  name = "Elixir of Agility" },
-      { level = 38, itemID = 9187,  name = "Elixir of Greater Agility" },
-      { level = 46, itemID = 13452, name = "Elixir of the Mongoose" },
-      { level = 46, itemID = 9206,  name = "Elixir of Giants", classes = set("WARRIOR", "PALADIN") },
-    },
-    Healer = {
-      { level = 37, itemID = 9179,  name = "Elixir of Greater Intellect" },
-      { level = 50, itemID = 20007, name = "Mageblood Potion" },
-    },
-    Tank = {
-      { level = 25, itemID = 3825,  name = "Elixir of Fortitude" },
-      { level = 43, itemID = 13445, name = "Elixir of Superior Defense" },
-    },
+    R{ itemID = 2457,  name = "Elixir of Minor Agility",     level = 5,  summary = "+4 Agility",            auraIDs = { 2374 } },
+    R{ itemID = 2454,  name = "Elixir of Lion's Strength",   level = 5,  summary = "+4 Strength",           auraIDs = { 2367 }, roles = set("Melee") },
+    R{ itemID = 5997,  name = "Elixir of Minor Defense",     level = 5,  summary = "+50 Armor",             auraIDs = { 673 } },
+    R{ itemID = 2458,  name = "Elixir of Minor Fortitude",   level = 5,  summary = "+27 Health",            auraIDs = { 2378 } },
+    R{ itemID = 3383,  name = "Elixir of Wisdom",            level = 10, summary = "+6 Intellect",          auraIDs = { 3166 } },
+    R{ itemID = 3389,  name = "Elixir of Defense",           level = 16, summary = "+150 Armor",            auraIDs = { 3220 } },
+    R{ itemID = 3390,  name = "Elixir of Lesser Agility",    level = 18, summary = "+8 Agility",            auraIDs = { 3160 } },
+    R{ itemID = 3391,  name = "Elixir of Ogre's Strength",   level = 20, summary = "+8 Strength",           auraIDs = { 3164 }, roles = set("Melee") },
+    R{ itemID = 3825,  name = "Elixir of Fortitude",         level = 25, summary = "+120 Health",           auraIDs = { 3593 }, roles = set("Tank") },
+    R{ itemID = 8949,  name = "Elixir of Agility",           level = 27, summary = "+15 Agility",           auraIDs = { 11328 }, roles = set("Melee") },
+    R{ itemID = 8951,  name = "Elixir of Greater Defense",   level = 29, summary = "+250 Armor",            auraIDs = { 11349 } },
+    R{ itemID = 6373,  name = "Elixir of Firepower",         level = 33, summary = "+10 Fire damage",       auraIDs = { 7844 }, roles = set("Caster"), classes = set("MAGE") },
+    R{ itemID = 9155,  name = "Arcane Elixir",               level = 37, summary = "+20 spell damage",      auraIDs = { 11390 }, roles = set("Caster") },
+    R{ itemID = 9179,  name = "Elixir of Greater Intellect", level = 37, summary = "+25 Intellect",         auraIDs = { 11396 }, roles = set("Healer") },
+    R{ itemID = 9187,  name = "Elixir of Greater Agility",   level = 38, summary = "+25 Agility",           auraIDs = { 11334 }, roles = set("Melee") },
+    R{ itemID = 17708, name = "Elixir of Frost Power",       level = 40, summary = "+15 Frost damage",      auraIDs = { 21920 } },
+    R{ itemID = 9264,  name = "Elixir of Shadow Power",      level = 40, summary = "+40 Shadow damage",     auraIDs = { 11474 }, roles = set("Caster"), classes = set("WARLOCK", "PRIEST") },
+    R{ itemID = 9224,  name = "Elixir of Demonslaying",      level = 40, summary = "+265 attack power vs demons", auraIDs = { 11406 } },
+    R{ itemID = 13445, name = "Elixir of Superior Defense",  level = 43, summary = "+450 Armor",            auraIDs = { 11348 }, roles = set("Tank") },
+    R{ itemID = 9206,  name = "Elixir of Giants",            level = 46, summary = "+25 Strength",          auraIDs = { 11405 }, roles = set("Melee"), classes = set("WARRIOR", "PALADIN") },
+    R{ itemID = 13452, name = "Elixir of the Mongoose",      level = 46, summary = "+25 Agility, +2% crit", auraIDs = { 17538 }, roles = set("Melee") },
+    R{ itemID = 13454, name = "Greater Arcane Elixir",       level = 47, summary = "+35 spell damage",      auraIDs = { 17539 }, roles = set("Caster") },
+    R{ itemID = 13453, name = "Elixir of Brute Force",       level = 50, summary = "+18 Strength and Stamina", auraIDs = { 17537 } },
+    R{ itemID = 21546, name = "Elixir of Greater Firepower", level = 50, summary = "+40 Fire damage",       auraIDs = { 26276 }, roles = set("Caster"), classes = set("MAGE") },
+    R{ itemID = 20007, name = "Mageblood Potion",            level = 50, summary = "12 mana per 5 sec",     auraIDs = { 24363 }, roles = set("Healer") },
   },
   flask = {
-    Caster = { { level = 50, itemID = 13512, name = "Flask of Supreme Power" } },
-    Healer = { { level = 50, itemID = 13511, name = "Flask of Distilled Wisdom" } },
-    Melee  = { { level = 50, itemID = 13510, name = "Flask of the Titans" } },
-    Tank   = { { level = 50, itemID = 13510, name = "Flask of the Titans" } },
+    R{ itemID = 13513, name = "Flask of Chromatic Resistance", level = 50, summary = "+25 all resistances", auraIDs = { 17629 } },
+    R{ itemID = 13511, name = "Flask of Distilled Wisdom",     level = 50, summary = "+2000 Mana",           auraIDs = { 17627 }, roles = set("Healer") },
+    R{ itemID = 13512, name = "Flask of Supreme Power",        level = 50, summary = "+150 spell damage",    auraIDs = { 17628 }, roles = set("Caster") },
+    R{ itemID = 13510, name = "Flask of the Titans",           level = 50, summary = "+1200 Health",         auraIDs = { 17626 }, roles = MELEE_TANK },
   },
   well_fed = {
-    Caster = { { level = 35, itemID = 13931, name = "Nightfin Soup" } },
-    Healer = {
-      { level = 30, itemID = 21217, name = "Sagefish Delight" },
-      { level = 35, itemID = 13931, name = "Nightfin Soup" },
-    },
-    Melee = {
-      { level = 45, itemID = 13928, name = "Grilled Squid", classes = set("ROGUE", "HUNTER") },
-      { level = 45, itemID = 20452, name = "Smoked Desert Dumplings", classes = set("WARRIOR", "PALADIN") },
-    },
-    Tank = { { level = 55, itemID = 21023, name = "Dirge's Kickin' Chimaerok Chops" } },
+    R{ itemID = 6888,  name = "Herb Baked Egg",                 level = 1,  summary = "+2 Stamina and Spirit",  auraIDs = { 19705 } },
+    R{ itemID = 3726,  name = "Big Bear Steak",                 level = 10, summary = "+4 Stamina and Spirit",  auraIDs = { 19706 } },
+    R{ itemID = 21072, name = "Smoked Sagefish",                level = 10, summary = "3 mana per 5 sec",       auraIDs = { 25694 } },
+    R{ itemID = 12212, name = "Hot Lion Chops",                 level = 25, summary = "+8 Stamina and Spirit",  auraIDs = { 19708 } },
+    R{ itemID = 21217, name = "Sagefish Delight",               level = 30, summary = "6 mana per 5 sec",       auraIDs = { 25941 }, roles = set("Healer") },
+    R{ itemID = 12218, name = "Monster Omelet",                 level = 35, summary = "+12 Stamina and Spirit", auraIDs = { 19710 } },
+    R{ itemID = 13931, name = "Nightfin Soup",                  level = 35, summary = "8 mana per 5 sec",       auraIDs = { 18194 }, roles = CASTER_HEALER },
+    R{ itemID = 18045, name = "Tender Wolf Steak",              level = 40, summary = "+12 Stamina and Spirit", auraIDs = { 22790 } },
+    R{ itemID = 13810, name = "Blessed Sunfruit",               level = 45, summary = "+10 Strength",           auraIDs = { 18125 } },
+    R{ itemID = 13813, name = "Blessed Sunfruit Juice",         level = 45, summary = "+10 Spirit",             auraIDs = { 18141 } },
+    R{ itemID = 13928, name = "Grilled Squid",                  level = 45, summary = "+10 Agility",            auraIDs = { 18192 }, roles = set("Melee"), classes = set("ROGUE", "HUNTER") },
+    R{ itemID = 18254, name = "Runn Tum Tuber Surprise",        level = 45, summary = "+10 Intellect",          auraIDs = { 22730 } },
+    R{ itemID = 20452, name = "Smoked Desert Dumplings",        level = 45, summary = "+20 Strength",           auraIDs = { 24799 }, roles = set("Melee"), classes = set("WARRIOR", "PALADIN") },
+    R{ itemID = 21023, name = "Dirge's Kickin' Chimaerok Chops", level = 55, summary = "+25 Stamina",          auraIDs = { 25661 }, roles = set("Tank") },
   },
-  weapon_mh = { Caster = WEAPON_CASTER, Healer = WEAPON_HEALER, Melee = WEAPON_MELEE, Tank = WEAPON_MELEE },
-  weapon_oh = { Caster = WEAPON_CASTER, Healer = WEAPON_HEALER, Melee = WEAPON_MELEE, Tank = WEAPON_MELEE },
+  weapon = {
+    R{ itemID = 2862,  name = "Rough Sharpening Stone",     level = 1,  summary = "+2 weapon damage",      roles = MELEE_TANK, weapon = "edged" },
+    R{ itemID = 3239,  name = "Rough Weightstone",          level = 1,  summary = "+2 weapon damage",      roles = MELEE_TANK, weapon = "blunt" },
+    R{ itemID = 20744, name = "Minor Wizard Oil",           level = 5,  summary = "+8 spell damage",       roles = CASTER_HEALER, weapon = "oil" },
+    R{ itemID = 2863,  name = "Coarse Sharpening Stone",    level = 10, summary = "+3 weapon damage",      roles = MELEE_TANK, weapon = "edged" },
+    R{ itemID = 3240,  name = "Coarse Weightstone",         level = 10, summary = "+3 weapon damage",      roles = MELEE_TANK, weapon = "blunt" },
+    R{ itemID = 2871,  name = "Heavy Sharpening Stone",     level = 20, summary = "+4 weapon damage",      roles = MELEE_TANK, weapon = "edged" },
+    R{ itemID = 3241,  name = "Heavy Weightstone",          level = 20, summary = "+4 weapon damage",      roles = MELEE_TANK, weapon = "blunt" },
+    R{ itemID = 20745, name = "Minor Mana Oil",             level = 20, summary = "4 mana per 5 sec",      roles = CASTER_HEALER, weapon = "oil" },
+    R{ itemID = 20746, name = "Lesser Wizard Oil",          level = 30, summary = "+16 spell damage",      roles = CASTER_HEALER, weapon = "oil" },
+    R{ itemID = 7964,  name = "Solid Sharpening Stone",     level = 35, summary = "+6 weapon damage",      roles = MELEE_TANK, weapon = "edged" },
+    R{ itemID = 7965,  name = "Solid Weightstone",          level = 35, summary = "+6 weapon damage",      roles = MELEE_TANK, weapon = "blunt" },
+    R{ itemID = 20747, name = "Lesser Mana Oil",            level = 35, summary = "8 mana per 5 sec",      roles = CASTER_HEALER, weapon = "oil" },
+    R{ itemID = 20750, name = "Wizard Oil",                 level = 40, summary = "+24 spell damage",      roles = CASTER_HEALER, weapon = "oil" },
+    R{ itemID = 12404, name = "Dense Sharpening Stone",     level = 45, summary = "+8 weapon damage",      roles = MELEE_TANK, weapon = "edged" },
+    R{ itemID = 12643, name = "Dense Weightstone",          level = 45, summary = "+8 weapon damage",      roles = MELEE_TANK, weapon = "blunt" },
+    R{ itemID = 20748, name = "Brilliant Mana Oil",         level = 45, summary = "12 mana per 5 sec, +25 healing", roles = set("Healer"), weapon = "oil" },
+    R{ itemID = 20749, name = "Brilliant Wizard Oil",       level = 45, summary = "+36 spell damage, +1% spell crit", roles = set("Caster"), weapon = "oil" },
+    R{ itemID = 18262, name = "Elemental Sharpening Stone", level = 50, summary = "+2% crit",              roles = MELEE_TANK, weapon = "edged" },
+  },
 }
 
+-- Sort each category by level, then name; build lookups.
+local CATALOGUE_INDEX = {}
+for cat, rows in pairs(Data.CATALOGUE) do
+  table.sort(rows, function(a, b) if a.level ~= b.level then return a.level < b.level end; return a.name < b.name end)
+  CATALOGUE_INDEX[cat] = {}
+  for _, r in ipairs(rows) do CATALOGUE_INDEX[cat][r.itemID] = r end
+end
+
+local CATEGORY_OF = { flask = "flask", elixir = "elixir", well_fed = "well_fed", weapon_mh = "weapon", weapon_oh = "weapon" }
+function Data.CategoryOf(key) return CATEGORY_OF[key] end
+function Data.CatalogueItem(category, itemID) local idx = CATALOGUE_INDEX[category]; return idx and idx[itemID] or nil end
+
+-- Merge every catalogue aura ID into the category entry's ids.
+for _, cat in ipairs({ "flask", "elixir", "well_fed" }) do
+  local entry = Data.byKey[cat]
+  local have = {}
+  for _, id in ipairs(entry.ids) do have[id] = true end
+  for _, r in ipairs(Data.CATALOGUE[cat]) do
+    for _, a in ipairs(r.auraIDs) do
+      if not have[a] then have[a] = true; entry.ids[#entry.ids + 1] = a end
+    end
+  end
+end
+
+-- Recommendation table derived from the catalogue: key -> role -> ordered rows.
+Data.RECOMMEND = {}
+local function addRecommend(key, cat)
+  Data.RECOMMEND[key] = {}
+  for _, role in ipairs(Data.ROLES) do
+    local out = {}
+    for _, r in ipairs(Data.CATALOGUE[cat]) do
+      if r.roles and r.roles[role] then
+        out[#out + 1] = { level = r.level, itemID = r.itemID, name = r.name, classes = r.classes, weapon = r.weapon }
+      end
+    end
+    Data.RECOMMEND[key][role] = out
+  end
+end
+for key, cat in pairs(CATEGORY_OF) do addRecommend(key, cat) end
+
+-- Highest-level qualifying row at or below the player's level. Ties: a
+-- class-specific row beats a generic one, otherwise the later row wins.
 function Data.Recommend(key, class, role, level, weaponKind)
   local byRole = Data.RECOMMEND[key]
   if not byRole then return nil end
@@ -221,9 +272,12 @@ function Data.Recommend(key, class, role, level, weaponKind)
   local best
   for _, row in ipairs(rows) do
     local okClass = not row.classes or row.classes[class]
-    local okWeapon = not row.weapon or row.weapon == weaponKind
-    if okClass and okWeapon and row.level <= (level or 0) and (not best or row.level >= best.level) then
-      best = row
+    local okWeapon = not row.weapon or row.weapon == "oil" or row.weapon == weaponKind
+    if okClass and okWeapon and row.level <= (level or 0) then
+      if not best or row.level > best.level
+         or (row.level == best.level and (row.classes ~= nil or best.classes == nil)) then
+        best = row
+      end
     end
   end
   if not best then return nil end
@@ -243,11 +297,9 @@ end
 
 function Data.AllItemIDs()
   local seen, out = {}, {}
-  for _, byRole in pairs(Data.RECOMMEND) do
-    for _, rows in pairs(byRole) do
-      for _, row in ipairs(rows) do
-        if not seen[row.itemID] then seen[row.itemID] = true; out[#out + 1] = row.itemID end
-      end
+  for _, rows in pairs(Data.CATALOGUE) do
+    for _, row in ipairs(rows) do
+      if not seen[row.itemID] then seen[row.itemID] = true; out[#out + 1] = row.itemID end
     end
   end
   table.sort(out)

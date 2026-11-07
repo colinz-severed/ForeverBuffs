@@ -51,7 +51,7 @@ end)
 T.test("raid roster uses raid unit tokens and skips the player", function()
   STUB.reload(); STUB.inRaid = true; STUB.group = { {class="DRUID", level=60}, {class="WARRIOR", level=60} }
   STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
-  T.eq(FB.Core.state.status.mark_of_the_wild, "missing"); T.truthy(FB.Core.state.tracked.battle_shout.quiet)
+  T.eq(FB.Core.state.status.mark_of_the_wild, "missing"); T.eq(FB.Core.state.tracked.battle_shout.reason, "group")
 end)
 T.test("weapon enchant expiry is caught by the ticker without an event", function()
   STUB.reload(); STUB.player.class = "SHAMAN"; STUB.known[8017] = true; STUB.tempEnchant[16] = { enchantID=1 }

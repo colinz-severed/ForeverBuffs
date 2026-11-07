@@ -16,7 +16,6 @@ T.test("spec entries exist with spec values", function()
   T.eq(d.fortitude.learnLevel, 1);   T.falsy(d.fortitude.selfOnly)
   T.eq(d.divine_spirit.learnLevel, 30); T.eq(d.shadow_protection.defaultEnabled, false)
   T.eq(d.blessing.learnLevel, 4);    T.eq(d.blessing.iconSpells[1], 20217); T.eq(d.blessing.iconSpells[2], 19740)
-  T.truthy(d.battle_shout.quietFromOthers); T.falsy(d.fortitude.quietFromOthers)
   T.truthy(d.paladin_aura.mustBeOwn and d.hunter_aspect.mustBeOwn and d.trueshot_aura.mustBeOwn)
   T.eq(d.righteous_fury.defaultEnabled, false)
   T.eq(d.mage_armor.iconSpells[1], 6117); T.eq(d.mage_armor.iconSpells[3], 168)
@@ -54,4 +53,46 @@ T.test("AllSpellIDs is distinct and covers ids", function()
   local all, set = FB.Data.AllSpellIDs(), {}
   for _, id in ipairs(all) do T.falsy(set[id], "dup " .. id); set[id] = true end
   T.truthy(set[588] and set[1243] and set[17626] and set[8681])
+end)
+T.test("priorities and default by reason", function()
+  T.eq(#FB.Data.PRIORITIES, 3); T.eq(FB.Data.DefaultPriority("known"), "normal")
+  T.eq(FB.Data.DefaultPriority("group"), "low"); T.eq(FB.Data.DefaultPriority("consumable"), "low")
+end)
+T.test("catalogue rows are well-formed, sorted, and cover the recommendations", function()
+  local C = FB.Data.CATALOGUE
+  for _, cat in ipairs({"flask","elixir","well_fed","weapon"}) do
+    local rows = C[cat]; T.truthy(rows and #rows > 0, cat)
+    local lastLevel = -1
+    for _, r in ipairs(rows) do
+      T.truthy(r.itemID and r.name and r.level and r.summary, cat .. " row"); T.truthy(r.level >= lastLevel, "sorted " .. cat); lastLevel = r.level
+      if cat ~= "weapon" then T.truthy(r.auraIDs and #r.auraIDs > 0, r.name .. " auraIDs") end
+    end
+  end
+  for key, byRole in pairs(FB.Data.RECOMMEND) do
+    local cat = FB.Data.CategoryOf(key)
+    for _, rows in pairs(byRole) do for _, rec in ipairs(rows) do T.truthy(FB.Data.CatalogueItem(cat, rec.itemID), rec.name .. " in catalogue") end end
+  end
+end)
+T.test("every catalogue aura id is in its category entry ids", function()
+  for _, cat in ipairs({"flask","elixir","well_fed"}) do
+    local ids = {}; for _, id in ipairs(FB.Data.byKey[cat].ids) do ids[id] = true end
+    for _, r in ipairs(FB.Data.CATALOGUE[cat]) do for _, a in ipairs(r.auraIDs) do T.truthy(ids[a], r.name .. " aura " .. a) end end
+  end
+end)
+T.test("catalogue includes the cheaper levelling items and excludes alcohol", function()
+  T.truthy(FB.Data.CatalogueItem("elixir", 2457))   -- Elixir of Minor Agility
+  T.truthy(FB.Data.CatalogueItem("elixir", 3390))   -- Elixir of Lesser Agility
+  T.truthy(FB.Data.CatalogueItem("flask", 13513))   -- Flask of Chromatic Resistance
+  T.truthy(FB.Data.CatalogueItem("well_fed", 12218)) -- Monster Omelet
+  T.falsy(FB.Data.CatalogueItem("well_fed", 21151)) -- Rumsey Rum Black Label
+  T.eq(FB.Data.CategoryOf("weapon_oh"), "weapon"); T.eq(FB.Data.CategoryOf("inner_fire"), nil)
+end)
+T.test("1.0 recommendations still hold after deriving from the catalogue", function()
+  T.eq(FB.Data.Recommend("elixir", "MAGE", "Caster", 60).itemID, 21546)
+  T.eq(FB.Data.Recommend("weapon_mh", "WARRIOR", "Melee", 60, "blunt").itemID, 12643)
+  T.eq(FB.Data.Recommend("weapon_mh", "PRIEST", "Healer", 60, "blunt").itemID, 20748)   -- oils ignore weapon kind
+  T.eq(FB.Data.Recommend("well_fed", "ROGUE", "Melee", 60).itemID, 13928)
+end)
+T.test("quietFromOthers is gone", function()
+  for _, e in ipairs(FB.Data.entries) do T.eq(e.quietFromOthers, nil, e.key) end
 end)
