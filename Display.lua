@@ -233,8 +233,7 @@ function Display.Update(state, settings, opts)
     -- whatever the alert style; other styles follow the alert style.
     local flash
     if opts.testMode then flash = styleHasFlash(settings.alertStyle) or style == "names"
-    elseif style == "names" then flash = missing
-    else flash = FB.Alerts.ShouldFlash(state, key, settings.alertStyle) end
+    else flash = FB.Alerts.ShouldFlash(state, key, settings.alertStyle, style) end
     if flash then
       if not icon.pulse:IsPlaying() then icon.pulse:Play() end
     else

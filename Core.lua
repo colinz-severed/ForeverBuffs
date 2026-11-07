@@ -198,9 +198,13 @@ function Core.Run()
   local transitions = Core.state:Evaluate()
   local hidden = Core.ShouldHide()
   local toSound = Core.alerts:Decide(transitions, Core.state, {
-    alertStyle = FB.db.alertStyle, hidden = hidden, inGrace = Core.inGrace, now = GetTime(),
+    alertStyle = FB.db.alertStyle, soundNormal = FB.db.soundNormal or FB.db.sound, soundHigh = FB.db.soundHigh,
+    hidden = hidden, inGrace = Core.inGrace, now = GetTime(),
   })
-  if #toSound > 0 then FB.Alerts.Play(FB.db.sound) end
+  local played = {}
+  for _, hit in ipairs(toSound) do
+    if not played[hit.sound] then played[hit.sound] = true; FB.Alerts.Play(hit.sound) end
+  end
   Core.Render()
 end
 
