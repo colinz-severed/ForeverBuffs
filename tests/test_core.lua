@@ -1,0 +1,80 @@
+T.test("InitDB fills defaults without clobbering", function()
+  STUB.reload(); ForeverBuffsDB = { iconSize=50 }; ForeverBuffsCharDB = nil; FB.Core.InitDB()
+  T.eq(FB.db.iconSize, 50); T.eq(FB.db.style, "grid"); T.eq(FB.db.position.y, 180); T.eq(FB.cdb.consumablesRaidsOnly, true)
+  T.eq(FB.db.sound, "raid_warning"); T.eq(FB.db.combat, "freeze"); T.truthy(FB.cdb.enabled)
+end)
+T.test("ShouldHide reasons", function()
+  STUB.reload(); T.falsy(FB.Core.ShouldHide())
+  STUB.player.dead = true; T.eq(select(2, FB.Core.ShouldHide()), "dead"); STUB.player.dead = false
+  STUB.player.taxi = true; T.eq(select(2, FB.Core.ShouldHide()), "taxi"); STUB.player.taxi = false
+  STUB.player.vehicle = true; T.eq(select(2, FB.Core.ShouldHide()), "vehicle"); STUB.player.vehicle = false
+  STUB.player.mounted = true; T.eq(select(2, FB.Core.ShouldHide()), "mounted"); FB.db.hideMounted = false; T.falsy(FB.Core.ShouldHide()); STUB.player.mounted = false
+  STUB.player.resting = true; T.falsy(FB.Core.ShouldHide()); FB.db.hideResting = true; T.eq(select(2, FB.Core.ShouldHide()), "resting"); STUB.player.resting = false
+  STUB.player.combat = true; T.falsy(FB.Core.ShouldHide()); FB.db.combat = "hide"; T.eq(select(2, FB.Core.ShouldHide()), "combat")
+end)
+T.test("login flow: grace, then evaluate, icon shown, no sound", function()
+  STUB.reload(); STUB.known[588] = true; FB.db.alertStyle = "both"
+  STUB.fire("PLAYER_ENTERING_WORLD"); T.truthy(FB.Core.inGrace); STUB.advance(3.1); STUB.advance(0.3)
+  T.falsy(FB.Core.inGrace)
+  T.eq(FB.Core.state.status.inner_fire, "missing"); T.eq(#STUB.sounds, 0); T.truthy(FB.Display.anchor:IsShown())
+end)
+T.test("display hidden during grace", function()
+  STUB.reload(); STUB.known[588] = true
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(0.3); T.falsy(FB.Display.anchor:IsShown())
+  STUB.advance(3.5); T.truthy(FB.Display.anchor:IsShown())
+end)
+T.test("buff dropping out of combat plays sound once", function()
+  STUB.reload(); STUB.known[588] = true; FB.db.alertStyle = "sound"; STUB.auras[588] = { sourceUnit="player" }
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5); T.eq(FB.Core.state.status.inner_fire, "present")
+  STUB.auras[588] = nil; STUB.fire("UNIT_AURA", "player"); STUB.advance(0.3); T.eq(#STUB.sounds, 1); T.eq(STUB.sounds[1][1], 8959)
+  STUB.fire("UNIT_AURA", "player"); STUB.advance(0.3); T.eq(#STUB.sounds, 1)
+end)
+T.test("combat freezes evaluation; leaving combat re-evaluates", function()
+  STUB.reload(); STUB.known[588] = true; STUB.auras[588] = { sourceUnit="player" }
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5); T.eq(FB.Core.state.status.inner_fire, "present")
+  STUB.player.combat = true; STUB.fire("PLAYER_REGEN_DISABLED"); STUB.auras[588] = nil; STUB.restricted = true
+  STUB.fire("UNIT_AURA", "player"); STUB.advance(2); T.eq(FB.Core.state.status.inner_fire, "present"); T.truthy(FB.Display.anchor:IsShown())
+  STUB.player.combat = false; STUB.restricted = false; STUB.fire("PLAYER_REGEN_ENABLED"); STUB.advance(0.3); T.eq(FB.Core.state.status.inner_fire, "missing")
+end)
+T.test("combat hide option hides the display in combat", function()
+  STUB.reload(); STUB.known[588] = true; FB.db.combat = "hide"
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5); T.truthy(FB.Display.anchor:IsShown())
+  STUB.player.combat = true; STUB.fire("PLAYER_REGEN_DISABLED"); T.falsy(FB.Display.anchor:IsShown())
+  STUB.player.combat = false; STUB.fire("PLAYER_REGEN_ENABLED"); STUB.advance(0.3); T.truthy(FB.Display.anchor:IsShown())
+end)
+T.test("group roster builds eligible casters", function()
+  STUB.reload(); STUB.group = { {class="PRIEST", level=60, name="Bob"}, {class="MAGE", level=5, connected=false} }
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
+  T.eq(FB.Core.state.status.fortitude, "missing"); T.eq(FB.Core.state.status.arcane_intellect, nil)
+  T.eq(FB.Core.Casters().fortitude[1], "Bob")
+end)
+T.test("raid roster uses raid unit tokens and skips the player", function()
+  STUB.reload(); STUB.inRaid = true; STUB.group = { {class="DRUID", level=60}, {class="WARRIOR", level=60} }
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
+  T.eq(FB.Core.state.status.mark_of_the_wild, "missing"); T.truthy(FB.Core.state.tracked.battle_shout.quiet)
+end)
+T.test("weapon enchant expiry is caught by the ticker without an event", function()
+  STUB.reload(); STUB.player.class = "SHAMAN"; STUB.known[8017] = true; STUB.tempEnchant[16] = { enchantID=1 }
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5); T.eq(FB.Core.state.status.shaman_imbue, "present")
+  STUB.tempEnchant[16] = nil; STUB.advance(1.5); T.eq(FB.Core.state.status.shaman_imbue, "missing")
+end)
+T.test("slash commands", function()
+  STUB.reload(); STUB.printed = {}
+  FB.Core.Slash("unlock"); T.truthy(FB.Core.unlocked); T.truthy(FB.Display.backdrop:IsShown())
+  FB.Core.Slash("lock"); T.falsy(FB.Core.unlocked); T.falsy(FB.Display.backdrop:IsShown())
+  FB.Core.Slash("test"); T.truthy(FB.Core.testMode); FB.Core.Slash("test"); T.falsy(FB.Core.testMode)
+  FB.Core.Slash("api"); T.truthy(#STUB.printed > 5)
+  STUB.spells[588] = { name="Inner Fire" }; STUB.printed = {}; FB.Core.Slash("ids")
+  local joined = table.concat(STUB.printed, "\n"); T.truthy(joined:find("588") and joined:find("Inner Fire") and joined:find("UNKNOWN"))
+  FB.db.position.x = 99; FB.Core.Slash("reset"); T.eq(FB.db.position.x, 0)
+  STUB.printed = {}; FB.Core.Slash("debug"); T.truthy(#STUB.printed > 0)
+  T.truthy(SlashCmdList.FOREVERBUFFS); T.eq(SLASH_FOREVERBUFFS1, "/fbuffs"); T.eq(SLASH_FOREVERBUFFS2, "/forbuffs")
+end)
+T.test("drag saves position into the db", function()
+  STUB.reload(); FB.Display.anchor:SetPoint("CENTER", UIParent, "CENTER", 7, 8)
+  FB.Display.anchor:GetScript("OnDragStop")(FB.Display.anchor); T.eq(FB.db.position.x, 7); T.eq(FB.db.position.y, 8)
+end)
+T.test("learning a spell starts tracking it", function()
+  STUB.reload(); STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5); T.eq(FB.Core.state.status.inner_fire, nil)
+  STUB.known[588] = true; STUB.fire("SPELLS_CHANGED"); STUB.advance(0.3); T.eq(FB.Core.state.status.inner_fire, "missing")
+end)
