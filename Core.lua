@@ -29,7 +29,33 @@ Core.testMode = false
 Core.casters = {}
 
 local PREFIX = "|cff33ff99ForeverBuffs|r: "
-local function say(msg) print(PREFIX .. tostring(msg)) end
+local capture = nil   -- when set, say() also appends plain text here
+local function say(msg)
+  msg = tostring(msg)
+  if capture then capture[#capture + 1] = msg end
+  print(PREFIX .. msg)
+end
+
+-- Runs fn while capturing everything it says into FB.db.report[kind], so the
+-- output can be read from the SavedVariables file after a /reload instead of
+-- being pasted out of the chat frame.
+local function captured(kind, fn, quiet)
+  local lines = {}
+  capture = lines
+  local savedPrint = print
+  if quiet then print = function() end end
+  local ok, err = pcall(fn)
+  print = savedPrint
+  capture = nil
+  if FB.db then
+    FB.db.report = FB.db.report or {}
+    FB.db.report[kind] = lines
+    FB.db.report.savedAt = date and date("%Y-%m-%d %H:%M:%S") or tostring(GetTime())
+    FB.db.report.version = Core.VERSION
+  end
+  if not ok then say("error while building " .. kind .. " report: " .. tostring(err)) end
+  return lines
+end
 
 -------------------------------------------------------------------------------
 -- Saved variables
@@ -322,7 +348,8 @@ local function cmdIds()
 end
 
 local function cmdHelp()
-  say("commands: /fbuffs [lock | unlock | test | reset | debug | api | ids | help]")
+  say("commands: /fbuffs [lock | unlock | test | reset | debug | api | ids | report | help]")
+  say("  report: saves the api, ids and debug output to the addon's saved variables (then /reload)")
   say("  (no argument) opens the options panel")
 end
 
@@ -347,11 +374,16 @@ function Core.Slash(msg)
     Core.Render()
     say("position reset")
   elseif msg == "debug" then
-    cmdDebug()
+    captured("debug", cmdDebug)
   elseif msg == "api" then
-    cmdApi()
+    captured("api", cmdApi)
   elseif msg == "ids" then
-    cmdIds()
+    captured("ids", cmdIds)
+  elseif msg == "report" then
+    captured("api", cmdApi, true)
+    captured("ids", cmdIds, true)
+    captured("debug", cmdDebug, true)
+    say("report saved. Type /reload now so it is written to disk.")
   elseif msg == "" then
     if FB.Options and FB.Options.Open then FB.Options.Open() else cmdHelp() end
   else
