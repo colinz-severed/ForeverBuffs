@@ -6,7 +6,8 @@ local Data = FB.Data
 -- Buff entries for World of Warcraft: Forever (client 1.60.1).
 -- Spell IDs are the Classic IDs, which Forever keeps. Learn levels from the
 -- Forever spellbook. IDs verified against wowhead.com/forever and in-game
--- /fbuffs ids on: (pending, see Task 10 of the plan)
+-- /fbuffs ids on 2026-11-08 (Forever 1.60.1): every spell and item ID below
+-- resolves on the client.
 --
 -- Entry fields:
 --   key, name, class (nil = consumable), learnLevel, selfOnly, kind ("aura" |
@@ -97,9 +98,8 @@ Data.entries = {
      castIDs = { 19740, 19742, 20217 },
      ids = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916,   -- Might
              19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918,          -- Wisdom
-             20217, 25898,                                                    -- Kings
-             1038, 25895,                                                     -- Salvation
-             19977, 19978, 19979, 25890 },                                    -- Light
+             20217, 25898 },                                                  -- Kings
+             -- Salvation (1038, 25895) and Light (19977-19979, 25890) do not exist on Forever
      iconSpells = { 20217, 19740 } },
   E{ key = "battle_shout", name = "Battle Shout", class = "WARRIOR", learnLevel = 1, quietFromOthers = true,
      ids = { 6673, 5242, 6192, 11549, 11550, 11551, 25289 }, iconSpells = { 6673 } },
