@@ -74,9 +74,24 @@ local function playerAuraData(id)
   return true, aura
 end
 
+-- Spell IDs whose lookup errored while auras were NOT restricted: the client
+-- has no such spell. They read as "absent" from then on instead of freezing
+-- their entry in its last state forever.
+API.deadIDs = {}
+
 function API.PlayerAura(id)
-  local ok, aura = playerAuraData(id)
-  if not ok then return nil end
+  if API.deadIDs[id] then return false end
+  local fn = resolve("C_UnitAuras.GetPlayerAuraBySpellID")
+  if not fn then return nil end
+  local ok, aura = pcall(fn, id)
+  if not ok then
+    if not API.AurasRestricted() then
+      API.deadIDs[id] = true
+      return false
+    end
+    return nil
+  end
+  if IsSecret(aura) then return nil end
   return aura ~= nil
 end
 
@@ -117,22 +132,71 @@ end
 -------------------------------------------------------------------------------
 -- Weapons
 -------------------------------------------------------------------------------
-function API.TempEnchant(slot)
+local function temporaryEnchant(slot)
   local fn = resolve("C_PaperDollInfo.GetTemporaryEnchantmentInfo")
   if fn then
     local ok, info = pcall(fn, slot)
-    if ok and not IsSecret(info) then return info ~= nil end
-    return false
+    if ok and not IsSecret(info) then return info ~= nil, true end
+    return false, true
   end
   local legacy = resolve("GetWeaponEnchantInfo")
   if legacy then
     local ok, hasMH, _, _, _, hasOH = pcall(legacy)
     if ok then
-      if slot == (_G.INVSLOT_OFFHAND or 17) then return hasOH == true end
-      return hasMH == true
+      if slot == (_G.INVSLOT_OFFHAND or 17) then return hasOH == true, true end
+      return hasMH == true, true
+    end
+  end
+  return false, false
+end
+
+-- On Forever a shaman imbue is its own enchant type (Enum.ItemEnchantType.Imbue)
+-- that GetTemporaryEnchantmentInfo does not report; C_Item.GetWeaponEnchantInfo
+-- lists every enchant on a weapon slot. Returns the list (or nil).
+local function weaponEnchantList(slot)
+  local fn = resolve("C_Item.GetWeaponEnchantInfo")
+  if not fn then return nil end
+  local WS = _G.Enum and _G.Enum.WeaponSlot or {}
+  local ws
+  if slot == (_G.INVSLOT_OFFHAND or 17) then ws = WS.OffHand ~= nil and WS.OffHand or 1
+  else ws = WS.MainHand ~= nil and WS.MainHand or 0 end
+  local ok, list = pcall(fn, ws)
+  if not ok or type(list) ~= "table" or IsSecret(list) then return nil end
+  return list
+end
+
+local function listHasEnchant(list)
+  if not list then return false end
+  for _, e in ipairs(list) do
+    if type(e) == "table" and not IsSecret(e) then
+      local has = e.hasEnchant
+      if has ~= nil and not IsSecret(has) and has == true then return true end
     end
   end
   return false
+end
+
+function API.TempEnchant(slot)
+  local present = temporaryEnchant(slot)
+  if present then return true end
+  return listHasEnchant(weaponEnchantList(slot))
+end
+
+-- Human-readable description of both weapon-enchant sources, for /fbuffs debug.
+function API.TempEnchantDetail(slot)
+  local present, available = temporaryEnchant(slot)
+  local list = weaponEnchantList(slot)
+  local types = {}
+  for _, e in ipairs(list or {}) do
+    if type(e) == "table" and not IsSecret(e) then
+      local t = e.enchantType
+      types[#types + 1] = (IsSecret(t) and "secret") or tostring(t)
+    end
+  end
+  return string.format("slot %d: temp=%s%s list=%s%s", slot,
+    present and "yes" or "no", available and "" or " (no API)",
+    list and tostring(#list) or "n/a",
+    #types > 0 and (" types=" .. table.concat(types, ",")) or "")
 end
 
 local function slotItemInfo(slot)
@@ -217,7 +281,7 @@ end
 local PROBED = {
   "C_SpellBook.IsSpellKnown", "C_SpellBook.IsSpellInSpellBook",
   "C_UnitAuras.GetPlayerAuraBySpellID", "C_UnitAuras.GetAuraDataBySpellName", "C_UnitAuras.GetAuraDataByIndex",
-  "C_PaperDollInfo.GetTemporaryEnchantmentInfo",
+  "C_PaperDollInfo.GetTemporaryEnchantmentInfo", "C_Item.GetWeaponEnchantInfo",
   "C_Secrets.ShouldAurasBeSecret", "C_Secrets.ShouldSpellAuraBeSecret",
   "C_Spell.GetSpellTexture", "C_Spell.GetSpellName",
   "C_Item.GetItemInfoInstant", "C_Item.GetItemNameByID", "C_Item.GetItemIconByID",

@@ -65,3 +65,20 @@ T.test("SpellName and SpellIcon", function()
   STUB.reset(); STUB.spells[588] = { name="Inner Fire", icon=135926 }
   T.eq(FB.API.SpellName(588), "Inner Fire"); T.eq(FB.API.SpellIcon(588), 135926); T.eq(FB.API.SpellName(1), nil)
 end)
+T.test("TempEnchant falls back to C_Item.GetWeaponEnchantInfo for imbues", function()
+  STUB.reset(); T.falsy(FB.API.TempEnchant(16))
+  STUB.weaponEnchants[0] = { { hasEnchant=true, enchantType=2, timeLeft=60000 } }
+  T.truthy(FB.API.TempEnchant(16)); T.falsy(FB.API.TempEnchant(17))
+  STUB.weaponEnchants[0] = { { hasEnchant=false } }; T.falsy(FB.API.TempEnchant(16))
+  STUB.weaponEnchants[0] = { { hasEnchant=STUB.secret(true), enchantType=2 } }; T.falsy(FB.API.TempEnchant(16))
+  STUB.weaponEnchants[1] = { { hasEnchant=true, enchantType=1 } }; T.truthy(FB.API.TempEnchant(17))
+end)
+T.test("PlayerAura marks ids that error while unrestricted as dead and returns false", function()
+  STUB.reset(); STUB.auraErrors = { [999]=true }
+  T.eq(FB.API.PlayerAura(999), false); T.truthy(FB.API.deadIDs[999])
+  STUB.auraErrors = {}; STUB.restricted = true; T.eq(FB.API.PlayerAura(588), nil); T.falsy(FB.API.deadIDs[588])
+end)
+T.test("TempEnchantDetail describes both sources", function()
+  STUB.reset(); STUB.tempEnchant[16] = { enchantID=5 }; STUB.weaponEnchants[0] = { { hasEnchant=true, enchantType=2, timeLeft=60000 } }
+  local d = FB.API.TempEnchantDetail(16); T.truthy(d:find("temp=yes", 1, true)); T.truthy(d:find("list=1", 1, true))
+end)

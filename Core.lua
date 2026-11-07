@@ -67,7 +67,14 @@ local function groupUnits()
   return units
 end
 
+Core.scanCount = 0
+Core.knownCache = {}
+
+function Core.InvalidateGroup() Core._members = nil end
+function Core.InvalidateKnown() Core.knownCache = {} end
+
 local function scanGroup()
+  Core.scanCount = Core.scanCount + 1
   local members, casters = {}, {}
   for _, unit in ipairs(groupUnits()) do
     local okExists, exists = pcall(UnitExists, unit)
@@ -97,7 +104,14 @@ function Core.Casters() return Core.casters or {} end
 function Core.BuildEnv()
   local API = FB.API
   return {
-    knows = API.KnowsSpell,
+    knows = function(id)
+      local cached = Core.knownCache[id]
+      if cached == nil then
+        cached = API.KnowsSpell(id)
+        Core.knownCache[id] = cached
+      end
+      return cached
+    end,
     aura = API.PlayerAura,
     auraSource = API.PlayerAuraSource,
     auraByName = API.PlayerAuraByName,
@@ -154,7 +168,7 @@ function Core.Run()
     Core.Render()
     return
   end
-  Core._members = nil
+  -- Group and known-spell caches are invalidated by events, not per run.
   local transitions = Core.state:Evaluate()
   local hidden = Core.ShouldHide()
   local toSound = Core.alerts:Decide(transitions, Core.state, {
@@ -189,6 +203,7 @@ end
 -------------------------------------------------------------------------------
 -- Events
 -------------------------------------------------------------------------------
+local KNOWN_EVENTS = { SPELLS_CHANGED = true, LEARNED_SPELL_IN_TAB = true, PLAYER_LEVEL_UP = true }
 local REFRESH_EVENTS = {
   "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP",
   "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST",
@@ -198,12 +213,18 @@ local REFRESH_EVENTS = {
 local REFRESH_SET = {}
 for _, e in ipairs(REFRESH_EVENTS) do REFRESH_SET[e] = true end
 
+local function isGroupUnit(unit)
+  return type(unit) == "string" and (unit:match("^party%d+$") or unit:match("^raid%d+$")) ~= nil
+end
+
 local frame = CreateFrame("Frame", "ForeverBuffsEventFrame")
 Core.frame = frame
 frame:RegisterEvent("PLAYER_LOGIN")
 
 local function onLogin()
   Core.InitDB()
+  Core.InvalidateKnown()
+  Core.InvalidateGroup()
   FB.Display.Init(FB.db)
   FB.Display.onMoved = function() FB.Display.SavePosition(FB.db) end
   Core.state = FB.State.New(FB.Data, Core.BuildEnv())
@@ -226,8 +247,18 @@ end
 frame:SetScript("OnEvent", function(self, event, arg1)
   if event == "PLAYER_LOGIN" then
     onLogin()
-  elseif event == "PLAYER_ENTERING_WORLD" or event == "GROUP_ROSTER_UPDATE" then
+  elseif event == "PLAYER_ENTERING_WORLD" then
+    Core.InvalidateKnown()
+    Core.InvalidateGroup()
     Core.StartGrace()
+  elseif event == "GROUP_ROSTER_UPDATE" then
+    Core.InvalidateGroup()
+    Core.StartGrace()
+  elseif event == "UNIT_LEVEL" then
+    if isGroupUnit(arg1) then
+      Core.InvalidateGroup()
+      Core.Refresh()
+    end
   elseif event == "PLAYER_REGEN_DISABLED" then
     Core.inCombat = true
     Core.Render()
@@ -237,6 +268,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
   elseif event == "UNIT_AURA" or event == "UNIT_INVENTORY_CHANGED" then
     if arg1 == "player" then Core.Refresh() end
   elseif REFRESH_SET[event] then
+    if KNOWN_EVENTS[event] then Core.InvalidateKnown() end
     Core.Refresh()
   end
 end)
@@ -247,7 +279,8 @@ end)
 local function cmdDebug()
   local s = Core.state
   if not s then say("not initialised yet"); return end
-  Core._members = nil
+  Core.InvalidateGroup()
+  Core.InvalidateKnown()
   local env = s.env
   say(string.format("v%s  class=%s level=%d role=%s", Core.VERSION, tostring(env.playerClass()), env.playerLevel(), s:Role()))
   local hidden, reason = Core.ShouldHide()
@@ -256,6 +289,11 @@ local function cmdDebug()
   if env.restricted() then say("auras restricted here") end
   local members = env.groupMembers()
   say(string.format("group members: %d", #members))
+  say("weapon " .. FB.API.TempEnchantDetail(INVSLOT_MAINHAND or 16))
+  say("weapon " .. FB.API.TempEnchantDetail(INVSLOT_OFFHAND or 17))
+  local dead = {}
+  for id in pairs(FB.API.deadIDs) do dead[#dead + 1] = tostring(id) end
+  if #dead > 0 then table.sort(dead); say("spell IDs unknown to this client: " .. table.concat(dead, ", ")) end
   local keys = s:TrackedKeys()
   if #keys == 0 then say("nothing tracked") end
   for _, key in ipairs(keys) do

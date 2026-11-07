@@ -85,8 +85,8 @@ function methods:SetLooping() end
 function methods:SetOwner() end
 function methods:AddLine(t) self._lines = self._lines or {}; table.insert(self._lines, t) end
 function methods:ClearLines() self._lines = {} end
-function methods:StartMoving() end
-function methods:StopMovingOrSizing() end
+function methods:StartMoving() self._moving = true end
+function methods:StopMovingOrSizing() self._moving = false end
 function methods:GetID() return self._id or 1 end
 function methods:GetEffectiveScale() return 1 end
 function methods:GetCenter() return 0, 0 end
@@ -210,6 +210,7 @@ end
 C_UnitAuras = {}
 function C_UnitAuras.GetPlayerAuraBySpellID(id)
   if STUB.restricted then error("aura access restricted") end
+  if STUB.auraErrors[id] then error("no such spell " .. tostring(id)) end
   local a = STUB.auras[id]; if not a then return nil end
   if a.secret then return STUB.secret(a) end
   return auraTable(id, a)
@@ -250,6 +251,8 @@ function C_Item.GetItemInfoInstant(id)
   return id, "Weapon", "Sub", "INVTYPE_WEAPON", it.icon or 0, it.classID or 0, it.subclassID or 0
 end
 
+function C_Item.GetWeaponEnchantInfo(weaponSlot) return STUB.weaponEnchants[weaponSlot] end
+
 C_PaperDollInfo = {}
 function C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot) local e = STUB.tempEnchant[slot]; if e then return e end; return nil end
 
@@ -270,6 +273,8 @@ INVSLOT_MAINHAND, INVSLOT_OFFHAND = 16, 17
 Enum = {
   SpellBookSpellBank = { Player = 0, Pet = 1 },
   ItemClass = { Weapon = 2, Armor = 4 },
+  WeaponSlot = { MainHand = 0, OffHand = 1, Ranged = 2 },
+  ItemEnchantType = { Temporary = 1, Imbue = 2 },
   ItemWeaponSubclass = { Axe1H = 0, Axe2H = 1, Bows = 2, Guns = 3, Mace1H = 4, Mace2H = 5, Polearm = 6, Sword1H = 7, Sword2H = 8,
     Staff = 10, Unarmed = 13, Dagger = 15, Crossbow = 18, Wand = 19 },
 }
@@ -347,6 +352,8 @@ function STUB.reset()
   STUB.restricted = false
   STUB.neverSecret = {}
   STUB.tempEnchant = {}
+  STUB.weaponEnchants = {}
+  STUB.auraErrors = {}
   STUB.offhandItem = nil
   STUB.mainhandItem = nil
   STUB.player = { class = "PRIEST", level = 60, dead = false, mounted = false, taxi = false, resting = false, combat = false, vehicle = false, instanceType = "none", name = "Tester" }

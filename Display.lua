@@ -76,6 +76,16 @@ local function createIcon(index)
   icon:EnableMouse(true)
   icon:SetScript("OnEnter", onIconEnter)
   icon:SetScript("OnLeave", onIconLeave)
+  -- Icons cover most of the unlocked area, so they forward drags to the anchor.
+  icon:RegisterForDrag("LeftButton")
+  icon:SetScript("OnDragStart", function()
+    if Display.unlocked and Display.anchor then Display.anchor:StartMoving() end
+  end)
+  icon:SetScript("OnDragStop", function()
+    if not Display.anchor then return end
+    Display.anchor:StopMovingOrSizing()
+    if Display.onMoved then Display.onMoved() end
+  end)
 
   icon.border = icon:CreateTexture(nil, "BACKGROUND")
   icon.border:SetColorTexture(BORDER_COLOR[1], BORDER_COLOR[2], BORDER_COLOR[3], BORDER_COLOR[4])
@@ -219,8 +229,11 @@ function Display.Update(state, settings, opts)
       icon.border:Hide()
     end
 
+    -- The "names" style is "flashing with names": it pulses missing icons
+    -- whatever the alert style; other styles follow the alert style.
     local flash
-    if opts.testMode then flash = styleHasFlash(settings.alertStyle)
+    if opts.testMode then flash = styleHasFlash(settings.alertStyle) or style == "names"
+    elseif style == "names" then flash = missing
     else flash = FB.Alerts.ShouldFlash(state, key, settings.alertStyle) end
     if flash then
       if not icon.pulse:IsPlaying() then icon.pulse:Play() end

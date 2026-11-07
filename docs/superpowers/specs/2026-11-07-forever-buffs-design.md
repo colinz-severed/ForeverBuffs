@@ -115,7 +115,7 @@ Edged vs blunt is read from the main-hand weapon's item subclass (sword, axe, da
 
 ### Weapon enhancements
 
-All "something on my weapon" reminders share the `weaponEnchant` kind: present when `C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot)` returns a table. Which entry a character gets:
+All "something on my weapon" reminders share the `weaponEnchant` kind: present when `C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot)` returns a table, **or** when `C_Item.GetWeaponEnchantInfo(weaponSlot)` lists an entry with `hasEnchant == true`. (Correction found in review: on Forever a shaman imbue is its own enchant type, `Enum.ItemEnchantType.Imbue`, which the temporary-enchant API does not report; the per-weapon list does. Rogue poisons may behave the same way, so the list is consulted for every weapon entry.) Which entry a character gets:
 
 - Shaman: **Weapon imbue** (own spell, see class table). No oil/stone entry.
 - Rogue: **Poison** main hand and off hand (own spells). No oil/stone entry.

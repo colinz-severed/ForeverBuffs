@@ -37,6 +37,21 @@ Flask, elixir, Well Fed and weapon oil/stone reminders are shown inside raid ins
 
 Forever hides buff data from addons during combat, so the display freezes at its last known state when you enter combat and updates the moment combat ends. You can choose to hide it in combat instead. If the game also restricts buff data out of combat somewhere, a small "?" appears next to the display to show it may be stale.
 
+## First-run checklist (in game)
+
+The spell and item IDs were taken from Wowhead's Forever database and spot-checked, but the full list is verified in game. With the game running:
+
+1. `/reload`, then `/console scriptErrors 1`
+2. `/fbuffs api` and paste the output (every line should say OK)
+3. `/fbuffs ids`, run it twice, and paste the output (look for UNKNOWN lines)
+4. `/fbuffs test` shows every tracked icon; `/fbuffs unlock`, drag it, `/fbuffs lock`, `/reload`, position kept
+5. `/fbuffs` opens the options panel; try each of the three styles
+6. Cast your self-buff: the icon dims (grid) or disappears (row). Cancel it: the icon lights up, and with alert style Sound a sound plays once
+7. Hover the Elixir, Well Fed and Weapon icons in test mode: the tooltip names the recommended item; change Role in options and it changes
+8. Join a party with another class: the group buff icon appears only for classes present
+9. Enter combat briefly: no errors, display frozen; leave combat: display updates
+10. `/fbuffs debug` and paste the output (it includes what both weapon-enchant APIs report, which settles whether imbues and poisons are detected)
+
 ## Development
 
 Tests run outside the game under Lua 5.1 via Python's `lupa` package:
