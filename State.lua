@@ -108,3 +108,91 @@ end
 function StateMT:Recommendation(key)
   return self.data.Recommend(key, self.env.playerClass(), self:Role(), self.env.playerLevel(), self.env.weaponKind())
 end
+
+-------------------------------------------------------------------------------
+-- Presence evaluation
+-------------------------------------------------------------------------------
+local function allNeverSecret(entry, env)
+  for _, id in ipairs(entry.ids or {}) do
+    if not env.neverSecret(id) then return false end
+  end
+  return true
+end
+
+-- Returns true (present), false (absent) or nil (unknown: a lookup failed).
+local function presence(entry, env)
+  if entry.kind == "weaponEnchant" then
+    return env.tempEnchant(entry.slot) == true
+  end
+  local anyUnknown = false
+  for _, id in ipairs(entry.ids or {}) do
+    local v = env.aura(id)
+    if v == true then
+      if entry.mustBeOwn then
+        local src = env.auraSource(id)
+        if src ~= "other" then return true end
+      else
+        return true
+      end
+    elseif v == nil then
+      anyUnknown = true
+    end
+  end
+  if entry.nameMatch then
+    local v = env.auraByName(entry.nameMatch)
+    if v == true then return true end
+    if v == nil then anyUnknown = true end
+  end
+  if anyUnknown then return nil end
+  return false
+end
+
+function StateMT:Evaluate()
+  local env = self.env
+  self:ComputeTracked()
+  local restricted = env.restricted() == true
+  local transitions = {}
+
+  for key, old in pairs(self.status) do
+    if not self.tracked[key] then
+      transitions[#transitions + 1] = { key = key, from = old, to = "untracked" }
+      self.status[key] = nil
+    end
+  end
+
+  for _, entry in ipairs(self.data.entries) do
+    local key = entry.key
+    if self.tracked[key] and (not restricted or allNeverSecret(entry, env)) then
+      local present = presence(entry, env)
+      if present ~= nil then
+        if entry.consumable and present then self.seenConsumable[key] = true end
+        local new = present and "present" or "missing"
+        local old = self.status[key]
+        if old ~= new then
+          transitions[#transitions + 1] = { key = key, from = old or "untracked", to = new }
+          self.status[key] = new
+        end
+      end
+    end
+  end
+
+  self.stale = restricted
+  if not restricted then self.lastEvaluated = env.now() end
+  return transitions
+end
+
+function StateMT:TrackedKeys()
+  local out = {}
+  for _, entry in ipairs(self.data.entries) do
+    if self.tracked[entry.key] then out[#out + 1] = entry.key end
+  end
+  return out
+end
+
+function StateMT:Missing()
+  local out = {}
+  for _, entry in ipairs(self.data.entries) do
+    if self.tracked[entry.key] and self.status[entry.key] == "missing" then out[#out + 1] = entry.key end
+  end
+  return out
+end
