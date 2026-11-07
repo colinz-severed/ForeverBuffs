@@ -302,7 +302,7 @@ STUB.realPrint = realPrint
 -------------------------------------------------------------------------------
 local function settingObject(variable, default, getter, setter)
   local s = { _variable = variable, _default = default }
-  function s:GetValue() return getter and getter() or self._value end
+  function s:GetValue() if getter then return getter() end; return self._value end
   function s:SetValue(v) if setter then setter(v) else self._value = v end end
   function s:GetVariable() return self._variable end
   function s:SetValueChangedCallback() end
@@ -386,9 +386,12 @@ function STUB.loadAddon()
   return FB
 end
 
-function STUB.reload()
+-- setup: optional function run after reset and before the addon loads
+-- (e.g. to set the player's class before PLAYER_LOGIN fires).
+function STUB.reload(setup)
   STUB.frames = {}
   STUB.reset()
+  if setup then setup() end
   STUB.loadAddon()
   STUB.fire("PLAYER_LOGIN")
   return FB

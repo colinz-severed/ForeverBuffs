@@ -1,0 +1,30 @@
+T.test("Build registers category once and Open works", function()
+  STUB.reload(); FB.Options.Build(); FB.Options.Build()
+  T.eq(#STUB.settingsCategories, 1); T.truthy(FB.Options.category); FB.Options.Open(); T.eq(STUB.openedCategory, FB.Options.category:GetID())
+end)
+T.test("Buffs section lists class self-buffs, all group buffs and consumables", function()
+  STUB.reload(function() STUB.player.class = "PRIEST" end)
+  local keys = FB.Options.buffKeys; local set = {}; for _, k in ipairs(keys) do set[k] = true end
+  T.truthy(set.inner_fire and set.fortitude and set.battle_shout and set.flask and set.weapon_mh); T.falsy(set.mage_armor)
+  STUB.reload(function() STUB.player.class = "SHAMAN" end); set = {}; for _, k in ipairs(FB.Options.buffKeys) do set[k] = true end
+  T.truthy(set.shaman_imbue); T.falsy(set.weapon_mh)
+end)
+T.test("buff toggles read defaults and write the char db", function()
+  STUB.reload(function() STUB.player.class = "HUNTER" end)
+  local s = FB.Options.buffSettings
+  T.eq(s.hunter_aspect:GetValue(), true); T.eq(s.weapon_mh:GetValue(), false); T.eq(s.shadow_protection:GetValue(), false)
+  s.weapon_mh:SetValue(true); T.eq(FB.cdb.enabled.weapon_mh, true)
+end)
+T.test("role setting defaults by class and persists", function()
+  STUB.reload(function() STUB.player.class = "MAGE" end)
+  T.eq(FB.Options.roleSetting:GetValue(), "Caster"); FB.Options.roleSetting:SetValue("Healer"); T.eq(FB.cdb.role, "Healer")
+end)
+T.test("display settings write the account db and refresh", function()
+  STUB.reload(); FB.Options.Build()
+  FB.Options.settings.iconSize:SetValue(52); T.eq(FB.db.iconSize, 52)
+  FB.Options.settings.style:SetValue("row"); T.eq(FB.db.style, "row")
+end)
+T.test("missing Settings API degrades to a printed notice", function()
+  STUB.reload(); local saved = Settings.RegisterVerticalLayoutCategory; Settings.RegisterVerticalLayoutCategory = nil; STUB.printed = {}
+  FB.Options.category = nil; FB.Options.Build(); T.eq(#STUB.printed, 1); Settings.RegisterVerticalLayoutCategory = saved
+end)
