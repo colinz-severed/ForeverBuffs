@@ -73,14 +73,14 @@ function StateMT:ComputeTracked()
       if offhandOK then
         if entry.consumable then
           if consumableTracked(self, entry, env) then
-            newTracked[entry.key] = { reason = "consumable", quiet = false }
+            newTracked[entry.key] = { reason = "consumable" }
           end
         else
           local known = anyKnown(env, entry.castIDs)
           if known then
-            newTracked[entry.key] = { reason = "known", quiet = false }
+            newTracked[entry.key] = { reason = "known" }
           elseif not entry.selfOnly and groupCanCast(entry, members) then
-            newTracked[entry.key] = { reason = "group", quiet = entry.quietFromOthers == true }
+            newTracked[entry.key] = { reason = "group" }
           end
         end
       end
@@ -105,8 +105,34 @@ function StateMT:Role()
   return self.data.DefaultRole(self.env.playerClass())
 end
 
+-- Priority: explicit per-character setting, else the default for the reason
+-- the entry is tracked (own buff → normal, group or consumable → low).
+function StateMT:Priority(key)
+  local settings = self.env.charSettings() or {}
+  local explicit = settings.priority and settings.priority[key]
+  if explicit then return explicit end
+  local tracked = self.tracked[key]
+  if not tracked then return "normal" end
+  return self.data.DefaultPriority(tracked.reason)
+end
+
+-- The player's own choice of consumable for this entry's category, if any.
+function StateMT:Pick(key)
+  local category = self.data.CategoryOf and self.data.CategoryOf(key)
+  if not category then return nil end
+  local settings = self.env.charSettings() or {}
+  return settings.pick and settings.pick[category] or nil
+end
+
 function StateMT:Recommendation(key)
-  return self.data.Recommend(key, self.env.playerClass(), self:Role(), self.env.playerLevel(), self.env.weaponKind())
+  local pick = self:Pick(key)
+  if pick then
+    local row = self.data.CatalogueItem(self.data.CategoryOf(key), pick)
+    if row then return { itemID = row.itemID, name = row.name, level = row.level, picked = true } end
+  end
+  local rec = self.data.Recommend(key, self.env.playerClass(), self:Role(), self.env.playerLevel(), self.env.weaponKind())
+  if rec then rec.picked = false end
+  return rec
 end
 
 -------------------------------------------------------------------------------
@@ -147,8 +173,10 @@ local function presence(entry, env)
   return false
 end
 
-function StateMT:Evaluate()
+-- opts.onlyKinds: set of entry kinds to check (others keep their status).
+function StateMT:Evaluate(opts)
   local env = self.env
+  local onlyKinds = opts and opts.onlyKinds or nil
   self:ComputeTracked()
   local restricted = env.restricted() == true
   local transitions = {}
@@ -162,7 +190,8 @@ function StateMT:Evaluate()
 
   for _, entry in ipairs(self.data.entries) do
     local key = entry.key
-    if self.tracked[key] and (not restricted or allNeverSecret(entry, env)) then
+    local wanted = not onlyKinds or onlyKinds[entry.kind]
+    if wanted and self.tracked[key] and (not restricted or allNeverSecret(entry, env)) then
       local present = presence(entry, env)
       if present ~= nil then
         if entry.consumable and present then self.seenConsumable[key] = true end
@@ -176,8 +205,10 @@ function StateMT:Evaluate()
     end
   end
 
-  self.stale = restricted
-  if not restricted then self.lastEvaluated = env.now() end
+  if not onlyKinds then
+    self.stale = restricted
+    if not restricted then self.lastEvaluated = env.now() end
+  end
   return transitions
 end
 

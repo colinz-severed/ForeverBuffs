@@ -28,6 +28,8 @@ function H.env(o)
   o.neverSecret = o.neverSecret or {}
   if o.settings.consumablesRaidsOnly == nil then o.settings.consumablesRaidsOnly = true end
   if o.settings.consumablesRemindDrop == nil then o.settings.consumablesRemindDrop = true end
+  o.settings.priority = o.settings.priority or {}
+  o.settings.pick = o.settings.pick or {}
   return {
     knows = function(id) return o.known[id] == true end,
     aura = function(id)

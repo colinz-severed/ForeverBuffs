@@ -58,3 +58,13 @@ T.test("lastEvaluated set on full evaluation only", function()
   local o = { known={[588]=true}, now=42 }; local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.lastEvaluated, 42)
   o.now = 50; o.restricted = true; s:Evaluate(); T.eq(s.lastEvaluated, 42)
 end)
+T.test("Evaluate with onlyKinds checks only weapon enchants", function()
+  local o = { known={[588]=true, [8017]=true}, class="SHAMAN", tempEnchant={}, auras={ [588]="player" } }
+  local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.status.inner_fire, "present"); T.eq(s.status.shaman_imbue, "missing")
+  o.auras = {}; o.tempEnchant[16] = true
+  local t = s:Evaluate({ onlyKinds = { weaponEnchant = true } }); T.eq(#t, 1); T.eq(t[1].key, "shaman_imbue"); T.eq(s.status.inner_fire, "present")
+  s:Evaluate(); T.eq(s.status.inner_fire, "missing")
+end)
+T.test("tracked entries no longer carry quiet", function()
+  local s = FB.State.New(FB.Data, env({ group={{class="WARRIOR", level=10}} })); s:ComputeTracked(); T.eq(s.tracked.battle_shout.quiet, nil)
+end)
