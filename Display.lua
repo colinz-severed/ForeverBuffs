@@ -208,15 +208,68 @@ function Display.ApplyPosition(pos)
   anchor:SetPoint(pos.point or "CENTER", UIParent, pos.relPoint or pos.point or "CENTER", pos.x or 0, pos.y or 0)
 end
 
+-- Nearest multiple of size; exact halves round away from zero.
+function Display.SnapOffset(v, size)
+  if not size or size <= 0 then return v end
+  local q = v / size
+  local r = (q >= 0) and math.floor(q + 0.5) or -math.floor(-q + 0.5)
+  return r * size
+end
+
 function Display.SavePosition(settings)
   local anchor = Display.anchor
   if not anchor then return end
   local point, _, relPoint, x, y = anchor:GetPoint()
   if not point then return end
-  settings.position = {
-    point = point, relPoint = relPoint or point,
-    x = math.floor((x or 0) + 0.5), y = math.floor((y or 0) + 0.5),
-  }
+  x, y = math.floor((x or 0) + 0.5), math.floor((y or 0) + 0.5)
+  if settings.snapToGrid then
+    local g = settings.gridSize or 16
+    x, y = Display.SnapOffset(x, g), Display.SnapOffset(y, g)
+  end
+  settings.position = { point = point, relPoint = relPoint or point, x = x, y = y }
+  Display.ApplyPosition(settings.position)
+  if Display.onPositionSaved then Display.onPositionSaved(settings.position) end
+end
+
+-------------------------------------------------------------------------------
+-- Alignment grid shown while unlocked
+-------------------------------------------------------------------------------
+function Display.ShowGrid(size)
+  size = math.max(4, size or 16)
+  local grid = Display.grid
+  if not grid then
+    grid = CreateFrame("Frame", "ForeverBuffsGrid", UIParent)
+    grid:SetAllPoints(UIParent)
+    grid:SetFrameStrata("BACKGROUND")
+    grid:EnableMouse(false)
+    grid.lines = {}
+    Display.grid = grid
+  end
+  local w, h = UIParent:GetWidth() or 1920, UIParent:GetHeight() or 1080
+  local n = 0
+  local function line(vertical, offset, center)
+    n = n + 1
+    local t = grid.lines[n]
+    if not t then t = grid:CreateTexture(nil, "BACKGROUND"); grid.lines[n] = t end
+    t:ClearAllPoints()
+    local a = center and 0.5 or 0.15
+    if center then t:SetColorTexture(1, 0.82, 0, a) else t:SetColorTexture(1, 1, 1, a) end
+    if vertical then
+      t:SetPoint("TOP", grid, "TOP", offset, 0); t:SetPoint("BOTTOM", grid, "BOTTOM", offset, 0); t:SetWidth(1)
+    else
+      t:SetPoint("LEFT", grid, "LEFT", 0, offset); t:SetPoint("RIGHT", grid, "RIGHT", 0, offset); t:SetHeight(1)
+    end
+    t:Show()
+  end
+  line(true, 0, true); line(false, 0, true)
+  for k = size, w / 2, size do line(true, k); line(true, -k) end
+  for k = size, h / 2, size do line(false, k); line(false, -k) end
+  for i = n + 1, #grid.lines do grid.lines[i]:Hide() end
+  grid:Show()
+end
+
+function Display.HideGrid()
+  if Display.grid then Display.grid:Hide() end
 end
 
 -------------------------------------------------------------------------------

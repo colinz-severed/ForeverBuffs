@@ -514,10 +514,12 @@ function Core.Slash(msg)
   msg = strtrim(string.lower(msg or ""))
   if msg == "unlock" then
     Core.unlocked = true
+    if FB.db.showGridWhileUnlocked ~= false then FB.Display.ShowGrid(FB.db.gridSize) else FB.Display.HideGrid() end
     Core.Render()
     say("unlocked: drag the frame, then /fbuffs lock")
   elseif msg == "lock" then
     Core.unlocked = false
+    FB.Display.HideGrid()
     FB.Display.SavePosition(FB.db)
     Core.Render()
     say("locked")
