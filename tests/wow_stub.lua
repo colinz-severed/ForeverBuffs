@@ -90,6 +90,62 @@ function methods:StopMovingOrSizing() self._moving = false end
 function methods:GetID() return self._id or 1 end
 function methods:GetEffectiveScale() return 1 end
 function methods:GetCenter() return 0, 0 end
+function methods:SetBackdrop(b) self._backdrop = b end
+function methods:SetBackdropColor(r, g, b, a) self._backdropColor = { r, g, b, a } end
+function methods:SetBackdropBorderColor(r, g, b, a) self._backdropBorderColor = { r, g, b, a } end
+function methods:SetFrameStrata(s) self._strata = s end
+function methods:GetFrameStrata() return self._strata end
+function methods:SetFrameLevel(l) self._level = l end
+function methods:GetFrameLevel() return self._level or 1 end
+function methods:SetScrollChild(c) self._scrollChild = c end
+function methods:GetScrollChild() return self._scrollChild end
+function methods:SetVerticalScroll(v) self._scroll = v end
+function methods:GetVerticalScroll() return self._scroll or 0 end
+function methods:EnableMouseWheel() end
+function methods:SetAutoFocus() end
+function methods:ClearFocus() end
+function methods:HighlightText() end
+function methods:SetCursorPosition() end
+function methods:SetJustifyH() end
+function methods:SetJustifyV() end
+function methods:SetFontObject() end
+function methods:SetTextColor(r, g, b, a) self._textColor = { r, g, b, a } end
+function methods:SetMinMaxValues(a, b) self._min, self._max = a, b end
+function methods:GetMinMaxValues() return self._min or 0, self._max or 1 end
+function methods:SetValue(v) self._value = v end
+function methods:GetValue() return self._value or 0 end
+function methods:SetValueStep(s) self._step = s end
+function methods:SetObeyStepOnDrag() end
+function methods:SetOrientation() end
+function methods:SetChecked(b) self._checked = b and true or false end
+function methods:GetChecked() return self._checked == true end
+function methods:SetNormalFontObject() end
+function methods:SetHighlightFontObject() end
+function methods:SetDisabledFontObject() end
+function methods:SetNormalTexture() end
+function methods:SetPushedTexture() end
+function methods:SetHighlightTexture() end
+function methods:SetCheckedTexture() end
+function methods:GetNormalTexture() return newRegion("Texture", nil, self) end
+function methods:GetHighlightTexture() return newRegion("Texture", nil, self) end
+function methods:RegisterForClicks() end
+function methods:Click() local f = self._scripts.OnClick; if f then f(self, "LeftButton") end end
+function methods:SetEnabled(e) self._enabled = e end
+function methods:IsEnabled() return self._enabled ~= false end
+function methods:Enable() self._enabled = true end
+function methods:Disable() self._enabled = false end
+function methods:SetToplevel() end
+function methods:Raise() end
+function methods:SetResizeBounds() end
+function methods:SetClampedToScreen() end
+function methods:SetMultiLine() end
+function methods:SetMaxLetters() end
+function methods:SetTextInsets() end
+function methods:SetWordWrap() end
+function methods:SetNonSpaceWrap() end
+function methods:GetStringWidth() return #tostring(self._text or "") * 6 end
+function methods:SetHitRectInsets() end
+function methods:SetPropagateKeyboardInput() end
 
 regionMT = { __index = function(t, k) local m = methods[k]; if m then return m end; return noop end }
 
@@ -100,6 +156,10 @@ function CreateFrame(kind, name, parent, template)
   return f
 end
 
+UISpecialFrames = {}
+BackdropTemplateMixin = {}
+GameFontNormal, GameFontHighlight, GameFontHighlightSmall, GameFontNormalSmall = {}, {}, {}, {}
+GameFontNormalLarge, GameFontDisableSmall, GameFontDisable, ChatFontNormal, GameFontHighlightLarge = {}, {}, {}, {}, {}
 UIParent = newRegion("Frame", "UIParent")
 UIParent._w, UIParent._h = 1920, 1080
 GameTooltip = newRegion("GameTooltip", "GameTooltip")
