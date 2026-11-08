@@ -1,9 +1,13 @@
 ## Interface: 16001
 ## Title: ForeverBuffs
 ## Notes: Reminds you of missing self, group and consumable buffs.
-## Author: Colin
-## Version: 1.0.0
+## Author: colinzmulan
+## X-Credits: Claude AI assisted
+## Version: 1.1.0
+## X-Website: https://github.com/colinz-severed/ForeverBuffs
+## X-BugReport: https://github.com/colinz-severed/ForeverBuffs/issues
 ## IconTexture: 135926
+## AddonCompartmentFunc: ForeverBuffs_OpenOptions
 ## SavedVariables: ForeverBuffsDB
 ## SavedVariablesPerCharacter: ForeverBuffsCharDB
 
@@ -13,4 +17,5 @@ State.lua
 Alerts.lua
 Display.lua
 Core.lua
+UI.lua
 Options.lua

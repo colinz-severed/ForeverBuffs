@@ -6,19 +6,25 @@ local Core = FB.Core
 -- Saved variables, events, hide rules, combat freeze, slash commands.
 -------------------------------------------------------------------------------
 
-Core.VERSION = "1.0.0"
+Core.VERSION = "1.1.0"
 Core.GRACE_SECONDS = 3
 Core.THROTTLE_SECONDS = 0.25
 Core.TICK_SECONDS = 1
 
 Core.DEFAULTS = {
   style = "grid", iconSize = 40, spacing = 6, direction = "RIGHT", perRow = 8, showNames = false,
-  alertStyle = "flash", sound = "raid_warning", combat = "freeze",
+  alertStyle = "flash", soundNormal = "raid_warning", soundHigh = "alarm3", combat = "freeze",
   hideMounted = true, hideResting = false, locked = true,
+  highScale = 1.15, lowScale = 0.7,
+  windowAlpha = 0.7,
+  windowPosition = { point = "CENTER", relPoint = "CENTER", x = 0, y = 0 },
   position = { point = "CENTER", relPoint = "CENTER", x = 0, y = 180 },
+  settingsVersion = 2,
+  revision = 0,
 }
+Core.SETTINGS_VERSION = 2
 Core.CHAR_DEFAULTS = {
-  enabled = {}, consumablesRaidsOnly = true, consumablesRemindDrop = true,
+  enabled = {}, priority = {}, pick = {}, consumablesRaidsOnly = true, consumablesRemindDrop = true,
   -- role = nil means "use FB.Data.DefaultRole(class)"
 }
 
@@ -72,8 +78,19 @@ local function copyDefaults(dst, src)
   return dst
 end
 
+-- Upgrades a saved-variables table written by an older version, in place.
+local function migrate(db)
+  if db.settingsVersion == nil then
+    -- 1.0 → 1.1: the single sound became the Normal-priority sound.
+    if db.sound ~= nil and db.soundNormal == nil then db.soundNormal = db.sound end
+  end
+  db.settingsVersion = Core.SETTINGS_VERSION
+end
+
 function Core.InitDB()
-  ForeverBuffsDB = copyDefaults(type(ForeverBuffsDB) == "table" and ForeverBuffsDB or {}, Core.DEFAULTS)
+  local db = type(ForeverBuffsDB) == "table" and ForeverBuffsDB or {}
+  migrate(db)
+  ForeverBuffsDB = copyDefaults(db, Core.DEFAULTS)
   ForeverBuffsCharDB = copyDefaults(type(ForeverBuffsCharDB) == "table" and ForeverBuffsCharDB or {}, Core.CHAR_DEFAULTS)
   FB.db = ForeverBuffsDB
   FB.cdb = ForeverBuffsCharDB
@@ -188,14 +205,23 @@ function Core.Render()
   })
 end
 
-function Core.Run()
+-- Any settings change: bump the revision the display keys its no-op check on.
+function Core.SettingChanged()
+  if FB.db then FB.db.revision = (FB.db.revision or 0) + 1 end
+  if FB.Display and FB.Display.Invalidate then FB.Display.Invalidate() end
+  Core.Refresh()
+  Core.Render()
+end
+
+-- opts.onlyKinds limits the presence checks (the ticker passes weaponEnchant).
+function Core.Run(opts)
   if not Core.state then return end
   if Core.inCombat or InCombatLockdown() then
     Core.Render()
     return
   end
   -- Group and known-spell caches are invalidated by events, not per run.
-  local transitions = Core.state:Evaluate()
+  local transitions = Core.state:Evaluate(opts)
   local hidden = Core.ShouldHide()
   local toSound = Core.alerts:Decide(transitions, Core.state, {
     alertStyle = FB.db.alertStyle, soundNormal = FB.db.soundNormal or FB.db.sound, soundHigh = FB.db.soundHigh,
@@ -208,14 +234,23 @@ function Core.Run()
   Core.Render()
 end
 
-function Core.Refresh()
-  if Core._pending then return end
+-- Throttled full refresh. A full request supersedes a pending partial one.
+function Core.Refresh(opts)
+  if Core._pending then
+    if opts == nil then Core._pendingOpts = nil end
+    return
+  end
   Core._pending = true
+  Core._pendingOpts = opts
   C_Timer.After(Core.THROTTLE_SECONDS, function()
     Core._pending = false
-    Core.Run()
+    local o = Core._pendingOpts
+    Core._pendingOpts = nil
+    Core.Run(o)
   end)
 end
+
+local WEAPON_ONLY = { onlyKinds = { weaponEnchant = true } }
 
 local graceToken = 0
 function Core.StartGrace()
@@ -270,7 +305,12 @@ local function onLogin()
   for _, e in ipairs(REFRESH_EVENTS) do pcall(frame.RegisterEvent, frame, e) end
 
   Core.ticker = C_Timer.NewTicker(Core.TICK_SECONDS, function()
-    if not Core.inCombat and not InCombatLockdown() then Core.Refresh() end
+    if Core.inCombat or InCombatLockdown() then return end
+    -- Weapon enchants expire without an event; everything else is event-driven.
+    -- While restricted out of combat (stale) keep trying a full pass so the
+    -- display recovers the moment restriction lifts. Render always re-checks
+    -- hide rules (taxi landing, dismount).
+    if Core.state and Core.state.stale then Core.Refresh() else Core.Refresh(WEAPON_ONLY) end
   end)
 end
 
@@ -389,10 +429,17 @@ function Core.Slash(msg)
     captured("debug", cmdDebug, true)
     say("report saved. Type /reload now so it is written to disk.")
   elseif msg == "" then
-    if FB.Options and FB.Options.Open then FB.Options.Open() else cmdHelp() end
+    if FB.Options and FB.Options.Toggle then FB.Options.Toggle()
+    elseif FB.Options and FB.Options.Open then FB.Options.Open()
+    else cmdHelp() end
   else
     cmdHelp()
   end
+end
+
+-- Addon compartment (minimap addon list) entry point; see ## AddonCompartmentFunc.
+function ForeverBuffs_OpenOptions()
+  if FB.Options and FB.Options.Toggle then FB.Options.Toggle() end
 end
 
 SLASH_FOREVERBUFFS1 = "/fbuffs"
