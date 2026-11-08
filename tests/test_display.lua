@@ -52,7 +52,8 @@ T.test("flashing only for missing, non-low icons under flash styles", function()
   function st:Priority(k) return k == "battle_shout" and "low" or "normal" end
   FB.Display.Update(st, settings({alertStyle="flash"}), {}); local shown = shownIcons()
   T.truthy(shown.inner_fire.pulse:IsPlaying()); T.falsy(shown.battle_shout.pulse:IsPlaying())
-  FB.Display.Update(st, settings({alertStyle="icon"}), {}); T.falsy(shown.inner_fire.pulse:IsPlaying())
+  local saved = FB.db.alert.normal.flash; FB.db.alert.normal.flash = false; FB.Display.Invalidate()
+  FB.Display.Update(st, settings(), {}); T.falsy(shown.inner_fire.pulse:IsPlaying()); FB.db.alert.normal.flash = saved
 end)
 T.test("test mode shows everything as missing; stale shows badge", function()
   STUB.reset(); FB.Display.Init(settings({style="row"}))

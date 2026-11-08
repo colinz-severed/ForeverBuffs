@@ -40,6 +40,8 @@ Core.CHAR_DEFAULTS = {
 }
 Core.CHAR_SETTINGS_VERSION = 3
 
+local WEAPON_ONLY = { onlyKinds = { weaponEnchant = true } }
+
 Core.inCombat = false
 Core.inGrace = false
 Core.unlocked = false
@@ -268,6 +270,16 @@ function Core.BuildEnv()
     playerLevel = API.PlayerLevel,
     weaponKind = API.MainhandWeaponKind,
     now = GetTime,
+    -- 1.2
+    auraTimes = API.PlayerAuraTimes,
+    auraTimesByName = API.PlayerAuraTimesByName,
+    weaponRemaining = API.WeaponRemaining,
+    spellName = API.SpellName,
+    inCombat = function() return Core.inCombat or InCombatLockdown() end,
+    thresholds = function()
+      return { long = FB.db.expireLongSeconds or 300, short = FB.db.expireShortSeconds or 60, longBuff = FB.db.longBuffSeconds or 900 }
+    end,
+    globalVisibility = function() return FB.db.visibility or "always" end,
   }
 end
 
@@ -312,16 +324,35 @@ function Core.Run(opts)
   end
   -- Group and known-spell caches are invalidated by events, not per run.
   local transitions = Core.state:Evaluate(opts)
-  local hidden = Core.ShouldHide()
-  local toSound = Core.alerts:Decide(transitions, Core.state, {
-    alertStyle = FB.db.alertStyle, soundNormal = FB.db.soundNormal or FB.db.sound, soundHigh = FB.db.soundHigh,
-    hidden = hidden, inGrace = Core.inGrace, now = GetTime(),
-  })
-  local played = {}
-  for _, hit in ipairs(toSound) do
-    if not played[hit.sound] then played[hit.sound] = true; FB.Alerts.Play(hit.sound) end
+  FB.Alerts.Deliver(Core.alerts:Decide(transitions, Core.state, Core.AlertContext()))
+  Core.Render()
+end
+
+function Core.AlertContext()
+  return {
+    channels = FB.db.alert, alertOnExpiring = FB.db.alertOnExpiring ~= false,
+    hidden = Core.ShouldHide(), inGrace = Core.inGrace,
+    inCombat = Core.inCombat or InCombatLockdown(), now = GetTime(),
+  }
+end
+
+-- Once a second: running-out countdown from cached end times (also in combat,
+-- no aura calls), due repeat reminders, and the cheap re-checks.
+function Core.Tick()
+  if not Core.state then return end
+  local inCombat = Core.inCombat or InCombatLockdown()
+  local transitions = Core.state:UpdateExpiring(GetTime())
+  if not inCombat then
+    local ctx = Core.AlertContext()
+    FB.Alerts.Deliver(Core.alerts:Decide(transitions, Core.state, ctx))
+    FB.Alerts.Deliver(Core.alerts:DueRepeats(Core.state, ctx))
   end
   Core.Render()
+  if inCombat then return end
+  -- Weapon enchants expire without an event; everything else is event-driven.
+  -- While restricted out of combat (stale) keep trying a full pass so the
+  -- display recovers the moment restriction lifts.
+  if Core.state.stale then Core.Refresh() else Core.Refresh(WEAPON_ONLY) end
 end
 
 -- Throttled full refresh. A full request supersedes a pending partial one.
@@ -340,7 +371,6 @@ function Core.Refresh(opts)
   end)
 end
 
-local WEAPON_ONLY = { onlyKinds = { weaponEnchant = true } }
 
 local graceToken = 0
 function Core.StartGrace()
@@ -394,14 +424,7 @@ local function onLogin()
   frame:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
   for _, e in ipairs(REFRESH_EVENTS) do pcall(frame.RegisterEvent, frame, e) end
 
-  Core.ticker = C_Timer.NewTicker(Core.TICK_SECONDS, function()
-    if Core.inCombat or InCombatLockdown() then return end
-    -- Weapon enchants expire without an event; everything else is event-driven.
-    -- While restricted out of combat (stale) keep trying a full pass so the
-    -- display recovers the moment restriction lifts. Render always re-checks
-    -- hide rules (taxi landing, dismount).
-    if Core.state and Core.state.stale then Core.Refresh() else Core.Refresh(WEAPON_ONLY) end
-  end)
+  Core.ticker = C_Timer.NewTicker(Core.TICK_SECONDS, function() Core.Tick() end)
 end
 
 frame:SetScript("OnEvent", function(self, event, arg1)

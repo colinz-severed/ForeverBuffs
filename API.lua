@@ -311,6 +311,17 @@ function API.PlayerAuraTimes(id)
   return exp, dur
 end
 
+function API.PlayerAuraTimesByName(name)
+  local fn = resolve("C_UnitAuras.GetAuraDataBySpellName")
+  if not fn then return nil end
+  local ok, aura = pcall(fn, "player", name, "HELPFUL")
+  if not ok or aura == nil or IsSecret(aura) then return nil end
+  local exp, dur = aura.expirationTime, aura.duration
+  if not readable(exp) or not readable(dur) then return nil end
+  if type(dur) ~= "number" or dur <= 0 or type(exp) ~= "number" or exp <= 0 then return nil end
+  return exp, dur
+end
+
 -- Seconds left on a weapon slot's enchant (temporary enchant or imbue), or nil.
 function API.WeaponRemaining(slot)
   local fn = resolve("C_PaperDollInfo.GetTemporaryEnchantmentInfo")

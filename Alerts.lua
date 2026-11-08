@@ -30,57 +30,139 @@ Alerts.SOUNDS = {
   { key = "coins",             name = "Loot Coins",          constant = "LOOT_WINDOW_COIN_SOUND",              kit = 120 },
   { key = "none",              name = "No sound" },
 }
-Alerts.THROTTLE_SECONDS = 30
 
 local BY_KEY = {}
 for _, s in ipairs(Alerts.SOUNDS) do BY_KEY[s.key] = s end
 function Alerts.SoundByKey(key) return BY_KEY[key] end
 
-local function styleHasSound(style) return style == "sound" or style == "both" end
-local function styleHasFlash(style) return style == "flash" or style == "both" end
 
 local function priorityOf(state, key)
   if state.Priority then return state:Priority(key) end
   return "normal"
 end
 
+local function soundsOn(state, key)
+  if state.Sounds then return state:Sounds(key) end
+  return true
+end
+
+local function displayName(state, key)
+  if state.DisplayName then return state:DisplayName(key) end
+  local entry = FB.Data and FB.Data.byKey[key]
+  return entry and entry.name or key
+end
+
+local function defaultChannels()
+  return (FB.db and FB.db.alert) or {}
+end
+
+local PRIORITY_RANK = { high = 3, normal = 2, low = 1 }
+Alerts.REPEAT_FLOOR = 10
+Alerts.TEXT_COLORS = { high = { 1, 0.82, 0 }, normal = { 1, 0.25, 0.2 }, low = { 1, 0.25, 0.2 } }
+
 local AlertsMT = {}
 AlertsMT.__index = AlertsMT
 
 function Alerts.New()
-  return setmetatable({ lastSound = {} }, AlertsMT)
+  return setmetatable({ lastAlert = {}, missingSince = {} }, AlertsMT)
 end
 
--- Which sound (key) a present→missing transition of this priority gets, or nil.
-local function soundFor(priority, ctx)
-  if priority == "high" then
-    if ctx.soundHigh and ctx.soundHigh ~= "none" then return ctx.soundHigh end
-    return nil
-  elseif priority == "normal" then
-    if styleHasSound(ctx.alertStyle) and ctx.soundNormal and ctx.soundNormal ~= "none" then return ctx.soundNormal end
-    return nil
+local function channelFor(ctx, prio)
+  local c = ctx.channels or defaultChannels()
+  return c[prio] or {}
+end
+
+local function formatRemaining(seconds)
+  seconds = math.max(0, math.floor((seconds or 0) + 0.5))
+  if seconds >= 60 then return string.format("%d min", math.floor(seconds / 60 + 0.5)) end
+  return string.format("%d s", seconds)
+end
+
+-- Collects alerts into result: distinct sounds, and texts grouped so that
+-- several "missing" alerts in one pass become one combined line.
+local function newResult() return { sounds = {}, texts = {}, _soundSeen = {}, _missing = {} } end
+
+local function addSound(result, sound)
+  if sound and sound ~= "none" and not result._soundSeen[sound] then
+    result._soundSeen[sound] = true
+    result.sounds[#result.sounds + 1] = sound
   end
-  return nil
+end
+
+local function finish(result)
+  if #result._missing > 0 then
+    local names, best = {}, "low"
+    for _, m in ipairs(result._missing) do
+      names[#names + 1] = m.name
+      if PRIORITY_RANK[m.priority] > PRIORITY_RANK[best] then best = m.priority end
+    end
+    table.insert(result.texts, 1, { text = table.concat(names, ", ") .. " missing!", priority = best })
+  end
+  result._soundSeen, result._missing = nil, nil
+  return result
+end
+
+-- One alert for key of kind "missing" or "expiring".
+local function alertOne(self, result, state, key, kind, ctx)
+  if not soundsOn(state, key) then return end
+  local prio = priorityOf(state, key)
+  local channel = channelFor(ctx, prio)
+  addSound(result, channel.sound)
+  if channel.text then
+    if kind == "missing" then
+      result._missing[#result._missing + 1] = { name = displayName(state, key), priority = prio }
+    else
+      local rem = state.Remaining and state:Remaining(key, ctx.now or 0)
+      result.texts[#result.texts + 1] = { text = displayName(state, key) .. " runs out in " .. formatRemaining(rem), priority = prio }
+    end
+  end
+  self.lastAlert[key] = ctx.now or 0
 end
 
 -- transitions: array of { key=, from=, to= }
--- ctx: { alertStyle=, soundNormal=, soundHigh=, hidden=, inGrace=, now= }
--- Returns the ordered array of { key=, sound= } that should sound now.
+-- ctx: { channels=, alertOnExpiring=, hidden=, inGrace=, inCombat=, now= }
+-- Returns { sounds = { soundKey, ... }, texts = { { text=, priority= }, ... } }.
 function AlertsMT:Decide(transitions, state, ctx)
-  local out = {}
-  if ctx.hidden or ctx.inGrace then return out end
+  local result = newResult()
   local now = ctx.now or 0
   for _, t in ipairs(transitions or {}) do
-    if t.from == "present" and t.to == "missing" then
-      local sound = soundFor(priorityOf(state, t.key), ctx)
-      local last = self.lastSound[t.key]
-      if sound and (not last or now - last >= Alerts.THROTTLE_SECONDS) then
-        self.lastSound[t.key] = now
-        out[#out + 1] = { key = t.key, sound = sound }
+    if t.to == "missing" then
+      self.missingSince[t.key] = now
+      if t.from ~= "missing" and t.from ~= "untracked" then
+        local last = self.lastAlert[t.key]
+        if not (ctx.hidden or ctx.inGrace or ctx.inCombat) and (not last or now - last >= Alerts.REPEAT_FLOOR) then
+          alertOne(self, result, state, t.key, "missing", ctx)
+        end
+      end
+    else
+      self.missingSince[t.key] = nil
+      if t.to == "expiring" and t.from == "present" and ctx.alertOnExpiring
+         and not (ctx.hidden or ctx.inGrace or ctx.inCombat) then
+        alertOne(self, result, state, t.key, "expiring", ctx)
       end
     end
   end
-  return out
+  return finish(result)
+end
+
+-- Repeated reminders for entries that stay missing.
+function AlertsMT:DueRepeats(state, ctx)
+  local result = newResult()
+  if ctx.hidden or ctx.inGrace or ctx.inCombat then return finish(result) end
+  local now = ctx.now or 0
+  for key, status in pairs(state.status or {}) do
+    if status == "missing" and soundsOn(state, key) then
+      local channel = channelFor(ctx, priorityOf(state, key))
+      local interval = channel["repeat"] or 0
+      if interval > 0 then
+        interval = math.max(Alerts.REPEAT_FLOOR, interval)
+        local since = self.lastAlert[key] or self.missingSince[key]
+        if since == nil then self.missingSince[key] = now; since = now end
+        if now - since >= interval then alertOne(self, result, state, key, "missing", ctx) end
+      end
+    end
+  end
+  return finish(result)
 end
 
 function Alerts.Play(soundKey)
@@ -91,12 +173,20 @@ function Alerts.Play(soundKey)
   if play then pcall(play, kit, "Master") end
 end
 
--- style: the display style ("names" pulses normal-priority missing icons
--- whatever the alert style). Low never flashes; high always does.
-function Alerts.ShouldFlash(state, key, alertStyle, style)
-  if state.status[key] ~= "missing" then return false end
-  local priority = priorityOf(state, key)
-  if priority == "high" then return true end
-  if priority == "low" then return false end
-  return styleHasFlash(alertStyle) or style == "names"
+function Alerts.Deliver(result)
+  if not result then return end
+  for _, sound in ipairs(result.sounds or {}) do Alerts.Play(sound) end
+  for _, t in ipairs(result.texts or {}) do
+    local c = Alerts.TEXT_COLORS[t.priority] or Alerts.TEXT_COLORS.normal
+    if FB.API and FB.API.ScreenText then FB.API.ScreenText(t.text, c[1], c[2], c[3]) end
+  end
+end
+
+-- Flash when missing or running out and the entry's priority channel says so.
+function Alerts.ShouldFlash(state, key, channels)
+  local status = state.status[key]
+  if status ~= "missing" and status ~= "expiring" then return false end
+  local c = (type(channels) == "table" and channels) or defaultChannels()
+  local channel = c[priorityOf(state, key)] or {}
+  return channel.flash == true
 end

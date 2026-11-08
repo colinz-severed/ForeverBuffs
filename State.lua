@@ -158,6 +158,13 @@ function StateMT:Sounds(key)
   return soundSetting(self, entry, self.env) and true or false
 end
 
+function StateMT:DisplayName(key)
+  local entry = self.data.byKey[key]; if not entry then return key end
+  if entry.consumable then return entry.name end
+  local id = self:IconSpell(key)
+  return (id and self.env.spellName and self.env.spellName(id)) or entry.name
+end
+
 function StateMT:Visibility(key)
   local settings = settingsOf(self.env)
   local v = settings.visibility and settings.visibility[key]
