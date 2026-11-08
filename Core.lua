@@ -19,14 +19,26 @@ Core.DEFAULTS = {
   windowAlpha = 0.7,
   windowPosition = { point = "CENTER", relPoint = "CENTER", x = 0, y = 0 },
   position = { point = "CENTER", relPoint = "CENTER", x = 0, y = 180 },
-  settingsVersion = 2,
+  -- 1.2
+  look = "icons", visibility = "always",
+  expireLongSeconds = 300, expireShortSeconds = 60, longBuffSeconds = 900,
+  alert = {
+    high   = { sound = "alarm3",       ["repeat"] = 30, text = true,  flash = true },
+    normal = { sound = "raid_warning", ["repeat"] = 0,  text = false, flash = true },
+    low    = { sound = "none",         ["repeat"] = 0,  text = false, flash = false },
+  },
+  alertOnExpiring = true,
+  snapToGrid = true, gridSize = 16, showGridWhileUnlocked = true,
+  settingsVersion = 3,
   revision = 0,
 }
-Core.SETTINGS_VERSION = 2
+Core.SETTINGS_VERSION = 3
 Core.CHAR_DEFAULTS = {
   enabled = {}, priority = {}, pick = {}, consumablesRaidsOnly = true, consumablesRemindDrop = true,
+  show = {}, sound = {}, visibility = {}, consumableWhere = {},
   -- role = nil means "use FB.Data.DefaultRole(class)"
 }
+Core.CHAR_SETTINGS_VERSION = 3
 
 Core.inCombat = false
 Core.inGrace = false
@@ -82,14 +94,67 @@ end
 local LEGACY_SOUND_KEYS = { alarm = "alarm3" }
 
 -- Upgrades a saved-variables table written by an older version, in place.
+-- Old keys are left in the table (never read again after 1.2's switch-over).
 local function migrate(db)
-  if db.settingsVersion == nil then
+  local from = db.settingsVersion
+  if from == nil then
     -- 1.0 → 1.1: the single sound became the Normal-priority sound.
     if db.sound ~= nil and db.soundNormal == nil then
       db.soundNormal = LEGACY_SOUND_KEYS[db.sound] or db.sound
     end
   end
+  if (from or 0) < 3 then
+    -- 1.1 → 1.2: style splits into look + visibility; alertStyle and the two
+    -- sounds become per-priority alert channels.
+    local alert = type(db.alert) == "table" and db.alert or {}
+    db.alert = alert
+    alert.high = alert.high or {}
+    alert.normal = alert.normal or {}
+    if db.soundHigh ~= nil and alert.high.sound == nil then alert.high.sound = db.soundHigh end
+    if db.soundNormal ~= nil and alert.normal.sound == nil then alert.normal.sound = db.soundNormal end
+    if db.style ~= nil and db.look == nil then
+      if db.style == "names" then
+        db.look, db.visibility = "names_beside", db.visibility or "missing"
+        alert.normal.flash = true        -- 1.1's "flashing with names" always pulsed
+      elseif db.style == "row" then
+        db.look, db.visibility = (db.showNames and "names_below" or "icons"), db.visibility or "missing"
+      else
+        db.look, db.visibility = (db.showNames and "names_below" or "icons"), db.visibility or "always"
+      end
+    elseif db.showNames and db.look == nil then
+      db.look = "names_below"
+    end
+    local style = db.alertStyle
+    if style == "icon" then
+      if db.style ~= "names" then alert.normal.flash = false end
+      alert.normal.sound = "none"
+    elseif style == "flash" then
+      alert.normal.sound = "none"
+    elseif style == "sound" then
+      if db.style ~= "names" then alert.normal.flash = false end
+    end
+  end
   db.settingsVersion = Core.SETTINGS_VERSION
+end
+
+local CATEGORIES = { "elixir", "flask", "well_fed", "weapon" }
+
+function Core.MigrateChar(cdb)
+  if (cdb.settingsVersion or 0) < 3 then
+    cdb.show = cdb.show or {}
+    cdb.sound = cdb.sound or {}
+    for key, on in pairs(cdb.enabled or {}) do
+      if cdb.show[key] == nil then cdb.show[key] = on and true or false end
+      if cdb.sound[key] == nil then cdb.sound[key] = on and true or false end
+    end
+    cdb.consumableWhere = cdb.consumableWhere or {}
+    if cdb.consumablesRaidsOnly == false then
+      for _, cat in ipairs(CATEGORIES) do
+        if cdb.consumableWhere[cat] == nil then cdb.consumableWhere[cat] = "everywhere" end
+      end
+    end
+  end
+  cdb.settingsVersion = Core.CHAR_SETTINGS_VERSION
 end
 
 -- A sound key the current sound list does not know falls back to the default.
@@ -99,6 +164,14 @@ local function validateSounds(db)
   for _, field in ipairs({ "soundNormal", "soundHigh" }) do
     if db[field] ~= nil and not byKey(db[field]) then db[field] = Core.DEFAULTS[field] end
   end
+  if type(db.alert) == "table" then
+    for prio, channel in pairs(db.alert) do
+      local default = Core.DEFAULTS.alert[prio]
+      if type(channel) == "table" and default and channel.sound ~= nil and not byKey(channel.sound) then
+        channel.sound = default.sound
+      end
+    end
+  end
 end
 
 function Core.InitDB()
@@ -106,7 +179,9 @@ function Core.InitDB()
   migrate(db)
   validateSounds(db)
   ForeverBuffsDB = copyDefaults(db, Core.DEFAULTS)
-  ForeverBuffsCharDB = copyDefaults(type(ForeverBuffsCharDB) == "table" and ForeverBuffsCharDB or {}, Core.CHAR_DEFAULTS)
+  local cdb = type(ForeverBuffsCharDB) == "table" and ForeverBuffsCharDB or {}
+  Core.MigrateChar(cdb)
+  ForeverBuffsCharDB = copyDefaults(cdb, Core.CHAR_DEFAULTS)
   FB.db = ForeverBuffsDB
   FB.cdb = ForeverBuffsCharDB
   return FB.db, FB.cdb
