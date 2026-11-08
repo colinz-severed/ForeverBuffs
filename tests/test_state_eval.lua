@@ -26,9 +26,9 @@ T.test("well fed matches by name too", function()
   local o = { instance="raid", auraNames={ ["Well Fed"]=true } }; local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.status.well_fed, "present")
 end)
 T.test("consumable seen then dropped becomes tracked outside raids", function()
-  local o = { instance="none", settings={consumablesRaidsOnly=false, consumablesRemindDrop=true}, auras={ [17626]="player" } }
+  local o = { instance="none", settings={ consumableWhere={ flask="everywhere" }, consumablesRemindDrop=true }, auras={ [17626]="player" } }
   local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.truthy(s.seenConsumable.flask)
-  o.settings.consumablesRaidsOnly = true; o.auras = {}; local t = s:Evaluate(); T.eq(s.status.flask, "missing")
+  o.settings.consumableWhere.flask = "raids"; o.auras = {}; local t = s:Evaluate(); T.eq(s.status.flask, "missing")
 end)
 T.test("errored lookup keeps previous state and fires nothing", function()
   local o = { known={[588]=true}, auras={ [588]="player" } }; local s = FB.State.New(FB.Data, env(o)); s:Evaluate()
@@ -67,4 +67,30 @@ T.test("Evaluate with onlyKinds checks only weapon enchants", function()
 end)
 T.test("tracked entries no longer carry quiet", function()
   local s = FB.State.New(FB.Data, env({ group={{class="WARRIOR", level=10}} })); s:ComputeTracked(); T.eq(s.tracked.battle_shout.quiet, nil)
+end)
+T.test("expiring from end times: short and long thresholds, permanent buffs", function()
+  local o = { known={[588]=true}, auras={ [588]="player" }, auraTimes={ [588]={ 59, 600 } }, now=0 }
+  local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.status.inner_fire, "expiring")
+  o.auraTimes[588] = { 299, 1800 }; s:Evaluate(); T.eq(s.status.inner_fire, "expiring")
+  o.auraTimes[588] = { 301, 1800 }; local t = s:Evaluate(); T.eq(s.status.inner_fire, "present"); T.eq(t[1].from, "expiring"); T.eq(t[1].to, "present")
+  o.known[465] = true; o.auras[465] = "player"; s:Evaluate(); T.eq(s.status.paladin_aura, "present"); T.eq(s.expiresAt.paladin_aura, nil)
+end)
+T.test("combat countdown runs from cached end times without aura calls", function()
+  local o = { known={[588]=true}, auras={ [588]="player" }, auraTimes={ [588]={ 100, 600 } }, now=0 }
+  local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.status.inner_fire, "present")
+  o.combat = true; for _, id in ipairs(FB.Data.byKey.inner_fire.ids) do o.auraErrors[id] = true end
+  local calls = o.calls
+  local t = s:UpdateExpiring(41); T.eq(s.status.inner_fire, "expiring"); T.eq(t[1].to, "expiring")
+  s:UpdateExpiring(150); T.eq(s.status.inner_fire, "expiring"); T.eq(s:Remaining("inner_fire", 150), 0); T.eq(s:Remaining("inner_fire", 90), 10)
+  T.eq(o.calls, calls)
+end)
+T.test("weapon enchant running out uses remaining time", function()
+  local o = { known={[8017]=true}, class="SHAMAN", tempEnchant={ [16]=true }, weaponRemaining={ [16]=250 }, now=1000 }
+  local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.status.shaman_imbue, "expiring"); T.eq(s.expiresAt.shaman_imbue, 1250)
+  o.weaponRemaining[16] = 3000; s:Evaluate(); T.eq(s.status.shaman_imbue, "present")
+end)
+T.test("missing clears the cached end time", function()
+  local o = { known={[588]=true}, auras={ [588]="player" }, auraTimes={ [588]={ 500, 600 } }, now=0 }
+  local s = FB.State.New(FB.Data, env(o)); s:Evaluate(); T.eq(s.expiresAt.inner_fire, 500)
+  o.auras = {}; s:Evaluate(); T.eq(s.status.inner_fire, "missing"); T.eq(s.expiresAt.inner_fire, nil)
 end)

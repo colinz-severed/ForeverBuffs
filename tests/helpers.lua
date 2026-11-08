@@ -30,9 +30,28 @@ function H.env(o)
   if o.settings.consumablesRemindDrop == nil then o.settings.consumablesRemindDrop = true end
   o.settings.priority = o.settings.priority or {}
   o.settings.pick = o.settings.pick or {}
+  o.settings.show = o.settings.show or {}
+  o.settings.sound = o.settings.sound or {}
+  o.settings.visibility = o.settings.visibility or {}
+  o.settings.consumableWhere = o.settings.consumableWhere or {}
+  o.auraTimes = o.auraTimes or {}
+  o.weaponRemaining = o.weaponRemaining or {}
+  o.calls = o.calls or 0
   return {
+    auraTimes = function(id)
+      o.calls = o.calls + 1
+      if o.auraErrors[id] then return nil end
+      local t = o.auraTimes[id]; if not t then return nil end
+      return t[1], t[2]
+    end,
+    auraTimesByName = function(name) return nil end,
+    weaponRemaining = function(slot) return o.weaponRemaining[slot] end,
+    inCombat = function() return o.combat == true end,
+    thresholds = function() return o.thresholds or { long = 300, short = 60, longBuff = 900 } end,
+    globalVisibility = function() return o.visibility or "always" end,
     knows = function(id) return o.known[id] == true end,
     aura = function(id)
+      o.calls = o.calls + 1
       if o.auraErrors[id] then return nil end
       return o.auras[id] ~= nil
     end,
