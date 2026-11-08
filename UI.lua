@@ -103,6 +103,7 @@ function UI.Slider(parent, label, min, max, step, get, set, formatter)
   formatter = formatter or function(v) return tostring(v) end
   local function snap(v)
     v = math.floor((v - min) / step + 0.5) * step + min
+    v = math.floor(v * 10000 + 0.5) / 10000   -- kill float drift (0.30000000000000004)
     if v < min then v = min elseif v > max then v = max end
     return v
   end
