@@ -6,8 +6,8 @@ local Data = FB.Data
 -- Buff entries for World of Warcraft: Forever (client 1.60.1).
 -- Spell IDs are the Classic IDs, which Forever keeps. Learn levels from the
 -- Forever spellbook. IDs verified against wowhead.com/forever and in-game
--- /fbuffs ids on 2026-11-08 (Forever 1.60.1): every spell and item ID below
--- resolves on the client.
+-- /fbuffs ids and /fbuffs report on 2026-11-08 (Forever 1.60.1): every spell,
+-- item, rank and elixir/flask buff ID below resolves on the client.
 --
 -- Entry fields:
 --   key, name, class (nil = consumable), learnLevel, selfOnly, kind ("aura" |
@@ -329,16 +329,19 @@ end
 function Data.ResolveItemSpells(resolveFn, onlyItems)
   local added = 0
   for cat, rows in pairs(Data.CATALOGUE) do
-    local entry = (cat ~= "weapon") and Data.byKey[cat] or nil
-    for _, r in ipairs(rows) do
-      if not onlyItems or onlyItems[r.itemID] then
-        local spell = resolveFn(r.itemID)
-        if spell then
-          r.resolvedSpell = spell
-          local have = false
-          for _, a in ipairs(r.auraIDs) do if a == spell then have = true end end
-          if not have then r.auraIDs[#r.auraIDs + 1] = spell end
-          if entry then
+    -- Food items cast the eating spell, not the Well Fed buff (confirmed in game
+    -- 2026-11-08), so food is detected by the "Well Fed" name instead; oils and
+    -- stones are weapon enchants. Only elixirs and flasks are merged.
+    local entry = (cat == "elixir" or cat == "flask") and Data.byKey[cat] or nil
+    if entry then
+      for _, r in ipairs(rows) do
+        if not onlyItems or onlyItems[r.itemID] then
+          local spell = resolveFn(r.itemID)
+          if spell then
+            r.resolvedSpell = spell
+            local have = false
+            for _, a in ipairs(r.auraIDs) do if a == spell then have = true end end
+            if not have then r.auraIDs[#r.auraIDs + 1] = spell end
             local inEntry = false
             for _, id in ipairs(entry.ids) do if id == spell then inEntry = true end end
             if not inEntry then entry.ids[#entry.ids + 1] = spell; added = added + 1 end

@@ -130,3 +130,9 @@ T.test("generated sources and ranks are attached", function()
   local hasDevo7 = false; for _, id in ipairs(FB.Data.byKey.paladin_aura.ids) do if id == 10293 then hasDevo7 = true end end; T.truthy(hasDevo7)
   T.eq(FB.Data.byKey.rogue_poison_mh.castIDs[1], 8681)
 end)
+T.test("food item spells (the eating spell) are not merged into Well Fed", function()
+  local before = #FB.Data.byKey.well_fed.ids
+  FB.Data.ResolveItemSpells(function(id) if id == 6888 then return 1248377 end end)
+  T.eq(#FB.Data.byKey.well_fed.ids, before)
+  for _, id in ipairs(FB.Data.byKey.well_fed.ids) do T.falsy(id == 1248377) end
+end)
