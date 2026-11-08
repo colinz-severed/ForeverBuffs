@@ -263,13 +263,17 @@ end
 -------------------------------------------------------------------------------
 -- ScrollList: fixed-height rows, row pool, mouse-wheel scrolling.
 -------------------------------------------------------------------------------
-function UI.ScrollList(parent, rowHeight, buildRow, fillRow)
+-- opts.virtual (default true): only visible rows get frames. With
+-- virtual=false every item gets its own row frame (scrolling just moves them),
+-- which keeps rows addressable for lists of a few dozen items.
+function UI.ScrollList(parent, rowHeight, buildRow, fillRow, opts)
   local f = CreateFrame("Frame", nil, parent)
   f:SetClipsChildren(true)
   f.rows = {}
   f.items = {}
   f.offset = 0
   f.rowHeight = rowHeight
+  f.virtual = not (opts and opts.virtual == false)
 
   local track = f:CreateTexture(nil, "ARTWORK")
   track:SetColorTexture(C.border[1], C.border[2], C.border[3], 0.6)
@@ -292,26 +296,44 @@ function UI.ScrollList(parent, rowHeight, buildRow, fillRow)
   end
 
   function f:Render()
-    local n = visibleCount()
     local maxOffset = self:MaxOffset()
     if self.offset > maxOffset then self.offset = maxOffset end
     if self.offset < 0 then self.offset = 0 end
-    for i = 1, n do
-      local item = self.items[self.offset + i]
-      local row = self.rows[i]
-      if item ~= nil then
+    local n
+    if self.virtual then
+      n = visibleCount()
+      for i = 1, n do
+        local item = self.items[self.offset + i]
+        local row = self.rows[i]
+        if item ~= nil then
+          if not row then
+            row = buildRow(self)
+            row:SetHeight(rowHeight)
+            self.rows[i] = row
+          end
+          row:ClearAllPoints()
+          row:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -(i - 1) * rowHeight)
+          row:SetPoint("RIGHT", self, "RIGHT", -8, 0)
+          fillRow(row, item, self.offset + i)
+          row:Show()
+        elseif row then
+          row:Hide()
+        end
+      end
+    else
+      n = #self.items
+      for i = 1, n do
+        local row = self.rows[i]
         if not row then
           row = buildRow(self)
           row:SetHeight(rowHeight)
           self.rows[i] = row
         end
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -(i - 1) * rowHeight)
+        row:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -(i - 1 - self.offset) * rowHeight)
         row:SetPoint("RIGHT", self, "RIGHT", -8, 0)
-        fillRow(row, item, self.offset + i)
+        fillRow(row, self.items[i], i)
         row:Show()
-      elseif row then
-        row:Hide()
       end
     end
     for i = n + 1, #self.rows do self.rows[i]:Hide() end
