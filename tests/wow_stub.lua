@@ -148,7 +148,13 @@ function methods:GetStringWidth() return #tostring(self._text or "") * 6 end
 function methods:SetHitRectInsets() end
 function methods:SetPropagateKeyboardInput() end
 
-regionMT = { __index = function(t, k) local m = methods[k]; if m then return m end; return noop end }
+-- Unknown capitalised names are treated as no-op methods (the real API has
+-- hundreds); unknown lowercase fields are nil, as on real frames.
+regionMT = { __index = function(t, k)
+  local m = methods[k]; if m then return m end
+  if type(k) == "string" and k:match("^%u") then return noop end
+  return nil
+end }
 
 function CreateFrame(kind, name, parent, template)
   local f = newRegion(kind or "Frame", name, parent)

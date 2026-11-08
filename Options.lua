@@ -8,7 +8,7 @@ local UI = FB.UI
 -------------------------------------------------------------------------------
 
 Options.TAB_NAMES = { "Display", "Alerts", "Buffs", "Consumables", "Position", "About" }
-Options.WIDTH, Options.HEIGHT = 720, 480
+Options.WIDTH, Options.HEIGHT = 800, 500
 Options.TABS_WIDTH = 130
 Options.controls = {}
 Options.panels = {}
@@ -74,13 +74,28 @@ local plain = function(v) return tostring(v) end
 -------------------------------------------------------------------------------
 -- Tabs
 -------------------------------------------------------------------------------
+local function mmss(v)
+  v = math.floor(v + 0.5)
+  if v >= 60 then
+    local m, sec = math.floor(v / 60), v % 60
+    if sec == 0 then return string.format("%d min", m) end
+    return string.format("%d:%02d", m, sec)
+  end
+  return v .. " s"
+end
+
 local function buildDisplay(panel)
   local put = stacker(panel)
-  put(register("style", UI.Dropdown(panel, "Display style", choices({
-    { value = "row", text = "Plain row (missing only)" },
-    { value = "names", text = "Flashing with names (missing only)" },
-    { value = "grid", text = "Always-on grid (dims when buffed)" },
-  }), dbGet("style", "grid"), dbSet("style"), 270)))
+  put(register("look", UI.Dropdown(panel, "Look", choices({
+    { value = "icons", text = "Icons" },
+    { value = "names_beside", text = "Icons with names beside" },
+    { value = "names_below", text = "Icons with names below" },
+  }), dbGet("look", "icons"), dbSet("look"), 270)))
+  put(register("visibility", UI.Dropdown(panel, "Show icons", choices({
+    { value = "always", text = "Always (dim when buffed)" },
+    { value = "missing", text = "Only when missing" },
+    { value = "expiring", text = "When missing or running out" },
+  }), dbGet("visibility", "always"), dbSet("visibility"), 270)))
   put(register("iconSize", UI.Slider(panel, "Icon size", 20, 80, 2, dbGet("iconSize", 40), dbSet("iconSize"), px)))
   put(register("spacing", UI.Slider(panel, "Spacing", 0, 20, 1, dbGet("spacing", 6), dbSet("spacing"), px)))
   put(register("direction", UI.Dropdown(panel, "Grow direction", choices({
@@ -88,7 +103,12 @@ local function buildDisplay(panel)
   }), dbGet("direction", "RIGHT"), dbSet("direction"), 270)))
   put(register("perRow", UI.Slider(panel, "Icons per row", 1, 20, 1, dbGet("perRow", 8), dbSet("perRow"), plain)))
 
-  put(register("showNames", UI.Checkbox(panel, "Show buff names under icons", dbGet("showNames", false), dbSet("showNames"))), 2)
+  put(register("expireLongSeconds", UI.Slider(panel, "Long buffs: show when this much is left", 60, 900, 30,
+    dbGet("expireLongSeconds", 300), dbSet("expireLongSeconds"), mmss)), 2)
+  put(register("expireShortSeconds", UI.Slider(panel, "Short buffs: show when this much is left", 10, 300, 10,
+    dbGet("expireShortSeconds", 60), dbSet("expireShortSeconds"), mmss)), 2)
+  put(register("longBuffSeconds", UI.Slider(panel, "A buff counts as long from", 300, 3600, 60,
+    dbGet("longBuffSeconds", 900), dbSet("longBuffSeconds"), mmss)), 2)
   put(register("highScale", UI.Slider(panel, "High priority size", 1.0, 1.5, 0.05, dbGet("highScale", 1.15), dbSet("highScale"), pct)), 2)
   put(register("lowScale", UI.Slider(panel, "Low priority size", 0.4, 1.0, 0.05, dbGet("lowScale", 0.7), dbSet("lowScale"), pct)), 2)
   put(register("windowAlpha", UI.Slider(panel, "Window opacity", 0.3, 1.0, 0.05, dbGet("windowAlpha", 0.7),
@@ -101,27 +121,63 @@ local function soundChoices()
   return out
 end
 
+local REPEAT_CHOICES = {
+  { value = 0, text = "Off (once)" }, { value = 15, text = "Every 15 s" }, { value = 30, text = "Every 30 s" },
+  { value = 60, text = "Every minute" }, { value = 120, text = "Every 2 min" }, { value = 300, text = "Every 5 min" },
+}
+local PRIORITY_LABEL = { high = "High", normal = "Normal", low = "Low" }
+
+local function alertGet(prio, field, default)
+  return function()
+    local c = FB.db and FB.db.alert and FB.db.alert[prio]
+    local v = c and c[field]
+    if v == nil then return default end
+    return v
+  end
+end
+local function alertSet(prio, field)
+  return function(v)
+    FB.db.alert = FB.db.alert or {}
+    FB.db.alert[prio] = FB.db.alert[prio] or {}
+    FB.db.alert[prio][field] = v
+    changed()
+  end
+end
+
+local function alertBlock(panel, put, col, prio)
+  local d = FB.Core.DEFAULTS.alert[prio]
+  local h = UI.SectionHeader(panel, PRIORITY_LABEL[prio] .. " priority"); h:SetHeight(16)
+  put(h, col, 4)
+  local snd = put(register("sound_" .. prio, UI.Dropdown(panel, "Sound", soundChoices, alertGet(prio, "sound", d.sound), alertSet(prio, "sound"), 190)), col)
+  local play = register("play_" .. prio, UI.Button(panel, "Play", function() FB.Alerts.Play(alertGet(prio, "sound", d.sound)()) end, 56))
+  play:SetPoint("BOTTOMLEFT", snd, "BOTTOMRIGHT", 6, 0)
+  put(register("repeat_" .. prio, UI.Dropdown(panel, "Repeat while missing", choices(REPEAT_CHOICES),
+    alertGet(prio, "repeat", d["repeat"]), alertSet(prio, "repeat"), 190)), col)
+  put(register("text_" .. prio, UI.Checkbox(panel, "Raid-warning text on screen", alertGet(prio, "text", d.text), alertSet(prio, "text"))), col, 2)
+  local fl = put(register("flash_" .. prio, UI.Checkbox(panel, "Flash the icon", alertGet(prio, "flash", d.flash), alertSet(prio, "flash"))), col, 2)
+  local test = register("test_" .. prio, UI.Button(panel, "Test", function()
+    FB.Alerts.Deliver({ sounds = { alertGet(prio, "sound", d.sound)() },
+      texts = { { text = "ForeverBuffs: test alert (" .. PRIORITY_LABEL[prio] .. ")", priority = prio } } })
+  end, 56))
+  test:SetPoint("LEFT", fl.label, "RIGHT", 12, 0)
+end
+
 local function buildAlerts(panel)
   local put = stacker(panel)
-  put(register("alertStyle", UI.Dropdown(panel, "Alert style (Normal priority)", choices({
-    { value = "icon", text = "Icon only" }, { value = "flash", text = "Flash" }, { value = "sound", text = "Sound" }, { value = "both", text = "Flash + sound" },
-  }), dbGet("alertStyle", "flash"), dbSet("alertStyle"), 270)))
-  local sn = put(register("soundNormal", UI.Dropdown(panel, "Normal sound", soundChoices, dbGet("soundNormal", "raid_warning"), dbSet("soundNormal"), 200)))
-  local pn = register("playNormal", UI.Button(panel, "Play", function() FB.Alerts.Play(FB.db.soundNormal) end, 60))
-  pn:SetPoint("BOTTOMLEFT", sn, "BOTTOMRIGHT", 8, 0)
-  local sh = put(register("soundHigh", UI.Dropdown(panel, "High sound (always plays)", soundChoices, dbGet("soundHigh", "alarm3"), dbSet("soundHigh"), 200)))
-  local ph = register("playHigh", UI.Button(panel, "Play", function() FB.Alerts.Play(FB.db.soundHigh) end, 60))
-  ph:SetPoint("BOTTOMLEFT", sh, "BOTTOMRIGHT", 8, 0)
+  alertBlock(panel, put, 1, "high")
+  alertBlock(panel, put, 1, "normal")
+  alertBlock(panel, put, 2, "low")
   local note = UI.SectionHeader(panel, "")
-  note:SetText("High: full size, gold border, flashes and sounds. Normal: follows the alert style. Low: smaller, never flashes or sounds.")
-  note:SetWidth(270); note:SetJustifyH("LEFT"); note:SetWordWrap(true)
-  put(note)
-
+  note:SetText("A buff only makes noise if its Sound tick is on (Buffs and Consumables tabs). Repeats and alerts never play in combat.")
+  note:SetWidth(270); note:SetJustifyH("LEFT"); note:SetWordWrap(true); note:SetHeight(42)
+  put(note, 2)
+  put(register("alertOnExpiring", UI.Checkbox(panel, "Alert once when a buff is running out",
+    dbGet("alertOnExpiring", true), dbSet("alertOnExpiring"))), 2)
   put(register("combat", UI.Dropdown(panel, "In combat", choices({
     { value = "freeze", text = "Freeze (keep last state)" }, { value = "hide", text = "Hide" },
   }), dbGet("combat", "freeze"), dbSet("combat"), 270)), 2)
-  put(register("hideMounted", UI.Checkbox(panel, "Hide while mounted", dbGet("hideMounted", true), dbSet("hideMounted"))), 2)
-  put(register("hideResting", UI.Checkbox(panel, "Hide while resting (inns, cities)", dbGet("hideResting", false), dbSet("hideResting"))), 2)
+  put(register("hideMounted", UI.Checkbox(panel, "Hide while mounted", dbGet("hideMounted", true), dbSet("hideMounted"))), 2, 2)
+  put(register("hideResting", UI.Checkbox(panel, "Hide while resting (inns, cities)", dbGet("hideResting", false), dbSet("hideResting"))), 2, 2)
 end
 
 local function buildPosition(panel)
@@ -136,6 +192,15 @@ local function buildPosition(panel)
   local testBtn = register("testMode", UI.Button(panel, "Test mode", function() FB.Core.Slash("test"); Options.Refresh() end, 160))
   testBtn.Refresh = function() testBtn:SetText(FB.Core and FB.Core.testMode and "Test mode: on" or "Test mode: off") end
   put(testBtn)
+  put(register("snapToGrid", UI.Checkbox(panel, "Snap to grid when moving", dbGet("snapToGrid", true), dbSet("snapToGrid"))), 1, 2)
+  put(register("showGridWhileUnlocked", UI.Checkbox(panel, "Show the grid while unlocked", dbGet("showGridWhileUnlocked", true),
+    dbSet("showGridWhileUnlocked", function(v)
+      if FB.Core and FB.Core.unlocked then if v then FB.Display.ShowGrid(FB.db.gridSize) else FB.Display.HideGrid() end end
+    end))), 1, 2)
+  put(register("gridSize", UI.Slider(panel, "Grid size", 4, 64, 4, dbGet("gridSize", 16),
+    dbSet("gridSize", function(v)
+      if FB.Core and FB.Core.unlocked and FB.db.showGridWhileUnlocked ~= false then FB.Display.ShowGrid(v) end
+    end), px)))
   local info = UI.SectionHeader(panel, "")
   info:SetWidth(270); info:SetJustifyH("LEFT"); info:SetWordWrap(true)
   info.Refresh = function()
@@ -143,8 +208,9 @@ local function buildPosition(panel)
     info:SetText(string.format("Anchor: %s  x %d  y %d", tostring(p.point or "CENTER"), p.x or 0, p.y or 0))
   end
   info.Refresh()
-  Options.allWidgets[#Options.allWidgets + 1] = info
+  register("anchorInfo", info)
   put(info, 2)
+  FB.Display.onPositionSaved = function() info.Refresh() end
   local tip = UI.SectionHeader(panel, "")
   tip:SetText("Unlock, drag the icons anywhere, then lock. Test mode shows every tracked buff as missing so you can see the layout and hear the sounds.")
   tip:SetWidth(270); tip:SetJustifyH("LEFT"); tip:SetWordWrap(true)
@@ -296,40 +362,23 @@ function Options.Toggle()
 end
 
 -------------------------------------------------------------------------------
--- Buffs tab
+-- Shared helpers for the Buffs and Consumables lists
 -------------------------------------------------------------------------------
-local PRIORITY_CHOICES = {
-  { value = "default", text = "Default" }, { value = "high", text = "High" },
-  { value = "normal", text = "Normal" }, { value = "low", text = "Low" },
-}
-local PRIORITY_NOTE = { high = "flash + sound", normal = "alert style", low = "small, quiet" }
+local PRIORITY_TEXT = { high = "High", normal = "Normal", low = "Low" }
+local VISIBILITY_TEXT = { always = "Always", missing = "When missing", expiring = "Running out" }
 
 local function playerClass() return FB.API.PlayerClass() end
 local function playerLevel() return FB.API.PlayerLevel() end
 
-local function entryDefaultEnabled(entry)
-  local byClass = entry.defaultEnabledByClass and entry.defaultEnabledByClass[playerClass()]
-  if byClass ~= nil then return byClass end
-  return entry.defaultEnabled
-end
+local function state() return FB.Core and FB.Core.state end
 
-local function entryEnabled(entry)
-  local v = FB.cdb and FB.cdb.enabled and FB.cdb.enabled[entry.key]
-  if v == nil then return entryDefaultEnabled(entry) end
-  return v
+local function shows(key)
+  local s = state(); if s then return s:Shows(key) end
+  return true
 end
-
-local function entryName(entry)
-  if entry.consumable then return entry.name end
-  local id = entry.iconSpells and entry.iconSpells[#entry.iconSpells]
-  if FB.Core and FB.Core.state then id = FB.Core.state:IconSpell(entry.key) or id end
-  return (id and FB.API.SpellName(id)) or entry.name
-end
-
-local function entryIcon(entry)
-  local id = entry.iconSpells and entry.iconSpells[#entry.iconSpells]
-  if FB.Core and FB.Core.state then id = FB.Core.state:IconSpell(entry.key) or id end
-  return (id and FB.API.SpellIcon(id)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+local function sounds(key)
+  local s = state(); if s then return s:Sounds(key) end
+  return false
 end
 
 local function knowsEntry(entry)
@@ -337,16 +386,12 @@ local function knowsEntry(entry)
   return false
 end
 
--- The priority this entry has, or would have once tracked: explicit setting,
--- else the default for its reason (own spell → normal, other class → low,
--- consumable → low). Not state:Priority(), which says "normal" for anything
--- not currently tracked.
-local function effectivePriority(entry)
-  local explicit = FB.cdb and FB.cdb.priority and FB.cdb.priority[entry.key]
-  if explicit then return explicit end
+-- The priority an entry gets when nothing is set: own class or known → normal,
+-- other classes → low, consumables → low.
+local function defaultPriority(entry)
   local reason
   if entry.consumable then reason = "consumable"
-  elseif knowsEntry(entry) or entry.class == playerClass() then reason = "known"   -- own class: normal once learned
+  elseif knowsEntry(entry) or entry.class == playerClass() then reason = "known"
   else reason = "group" end
   return FB.Data.DefaultPriority(reason)
 end
@@ -357,67 +402,176 @@ local function singleLine(fs, height)
   fs:SetHeight(height)
 end
 
+local function muted(fs) fs:SetTextColor(UI.COLORS.muted[1], UI.COLORS.muted[2], UI.COLORS.muted[3], 1) end
+
+local function checkButton(parent, onClick)
+  local b = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+  b:SetSize(22, 22)
+  b:SetScript("OnClick", onClick)
+  return b
+end
+
+-- Priority dropdown for a set of keys (first key is read).
+local function priorityDropdown(parent, keysFn, entryFn, onChange)
+  return UI.Dropdown(parent, nil, function()
+    local entry = entryFn()
+    local d = entry and PRIORITY_TEXT[defaultPriority(entry)] or "?"
+    return { { value = "default", text = "Default (" .. d .. ")" }, { value = "high", text = "High" },
+             { value = "normal", text = "Normal" }, { value = "low", text = "Low" } }
+  end, function()
+    local keys = keysFn(); local k = keys and keys[1]
+    return k and FB.cdb.priority[k] or "default"
+  end, function(v)
+    for _, k in ipairs(keysFn() or {}) do
+      if v == "default" then FB.cdb.priority[k] = nil else FB.cdb.priority[k] = v end
+    end
+    changed()
+    if onChange then onChange() end
+  end, 100)
+end
+
+local function visibilityDropdown(parent, keysFn, onChange)
+  return UI.Dropdown(parent, nil, function()
+    local g = VISIBILITY_TEXT[FB.db and FB.db.visibility or "always"] or "Always"
+    return { { value = "default", text = "Default (" .. g .. ")" }, { value = "always", text = "Always" },
+             { value = "missing", text = "When missing" }, { value = "expiring", text = "Running out" } }
+  end, function()
+    local keys = keysFn(); local k = keys and keys[1]
+    return k and FB.cdb.visibility[k] or "default"
+  end, function(v)
+    for _, k in ipairs(keysFn() or {}) do
+      if v == "default" then FB.cdb.visibility[k] = nil else FB.cdb.visibility[k] = v end
+    end
+    changed()
+    if onChange then onChange() end
+  end, 120)
+end
+
+local function setShows(keys, value)
+  for _, k in ipairs(keys) do FB.cdb.show[k] = value end
+  changed()
+end
+local function setSounds(keys, value)
+  for _, k in ipairs(keys) do FB.cdb.sound[k] = value end
+  changed()
+end
+
+-------------------------------------------------------------------------------
+-- Buffs tab
+-------------------------------------------------------------------------------
+local function entryName(entry)
+  local s = state()
+  if s then return s:DisplayName(entry.key) end
+  local id = entry.iconSpells and entry.iconSpells[#entry.iconSpells]
+  return (id and FB.API.SpellName(id)) or entry.name
+end
+
+local function entryIcon(entry)
+  local id = entry.iconSpells and entry.iconSpells[#entry.iconSpells]
+  local s = state(); if s then id = s:IconSpell(entry.key) or id end
+  return (id and FB.API.SpellIcon(id)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+local function rankText(entry)
+  local info = FB.Data.RankInfo(entry, FB.API.KnowsSpell, playerLevel())
+  if entry.class ~= playerClass() then
+    if not info then return "" end
+    if info.minLevel == info.maxLevel then return string.format("%d rank (%d)", info.total, info.minLevel) end
+    return string.format("%d ranks (%d-%d)", info.total, info.minLevel, info.maxLevel)
+  end
+  if not info then
+    if not knowsEntry(entry) and playerLevel() < (entry.learnLevel or 1) then return "learned at " .. entry.learnLevel end
+    return ""
+  end
+  if info.known == 0 then
+    if playerLevel() < (info.minLevel or entry.learnLevel or 1) then return "learned at " .. (info.minLevel or entry.learnLevel) end
+    return "|cff55ff55not learned, available!|r"
+  end
+  local text = string.format("Rank %d/%d", info.known, info.total)
+  if info.available then return text .. "  |cff55ff55rank available!|r" end
+  if info.nextLevel then return text .. "  next at " .. info.nextLevel end
+  return text
+end
+
+local function rankTooltip(owner, entry)
+  if not entry or not entry.ranks then return end
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:SetText(entryName(entry))
+  local level = playerLevel()
+  for _, ladder in ipairs(entry.ranks) do
+    GameTooltip:AddLine(ladder.family, 1, 0.82, 0)
+    for _, sp in ipairs(ladder.spells) do
+      local known = FB.API.KnowsSpell(sp.id)
+      local mark = known and "  (known)" or ((sp.level <= level) and "  (available)" or "")
+      local r, g, b = 0.8, 0.8, 0.8
+      if known then r, g, b = 0.5, 1, 0.5 elseif sp.level <= level then r, g, b = 1, 1, 0.4 end
+      GameTooltip:AddLine(string.format("Rank %d: level %d%s", sp.rank, sp.level, mark), r, g, b)
+    end
+  end
+  GameTooltip:Show()
+end
+
 local function buildBuffRow(parent)
   local row = CreateFrame("Frame", nil, parent)
   row.header = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   row.header:SetPoint("LEFT", row, "LEFT", 0, 0)
-  row.header:SetTextColor(UI.COLORS.muted[1], UI.COLORS.muted[2], UI.COLORS.muted[3], 1)
-  row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-  row.check:SetSize(22, 22)
-  row.check:SetPoint("LEFT", row, "LEFT", 0, 0)
-  row.check:SetScript("OnClick", function(self)
-    local entry = row.entry; if not entry then return end
-    local nv = not entryEnabled(entry)
-    FB.cdb.enabled[entry.key] = nv
-    self:SetChecked(nv)
-    changed()
+  muted(row.header)
+  row.show = checkButton(row, function(self)
+    if not row.key then return end
+    local nv = not shows(row.key); setShows({ row.key }, nv); self:SetChecked(nv)
   end)
+  row.show:SetPoint("LEFT", row, "LEFT", 0, 0)
+  row.sound = checkButton(row, function(self)
+    if not row.key then return end
+    local nv = not sounds(row.key); setSounds({ row.key }, nv); self:SetChecked(nv)
+  end)
+  row.sound:SetPoint("LEFT", row.show, "RIGHT", 2, 0)
   row.icon = row:CreateTexture(nil, "ARTWORK")
   row.icon:SetSize(20, 20)
-  row.icon:SetPoint("LEFT", row.check, "RIGHT", 4, 0)
+  row.icon:SetPoint("LEFT", row.sound, "RIGHT", 4, 0)
   row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
   row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-  row.name:SetWidth(190); row.name:SetJustifyH("LEFT"); singleLine(row.name, 28)
-  row.priority = UI.Dropdown(row, nil, choices(PRIORITY_CHOICES),
-    function() return row.key and FB.cdb.priority[row.key] or "default" end,
-    function(v)
-      if not row.key then return end
-      if v == "default" then FB.cdb.priority[row.key] = nil else FB.cdb.priority[row.key] = v end
-      changed()
-      if Options.RefreshBuffs then Options.RefreshBuffs() end
-    end, 100)
-  row.priority:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
-  row.note = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  row.note:SetPoint("LEFT", row.priority, "RIGHT", 10, 0)
-  row.note:SetTextColor(UI.COLORS.muted[1], UI.COLORS.muted[2], UI.COLORS.muted[3], 1)
-  singleLine(row.note, 28)
+  row.name:SetWidth(150); row.name:SetJustifyH("LEFT"); singleLine(row.name, 28)
+  row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  row.rank:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
+  row.rank:SetWidth(150); row.rank:SetJustifyH("LEFT"); singleLine(row.rank, 28)
+  muted(row.rank)
+  row.rankHover = CreateFrame("Frame", nil, row)
+  row.rankHover:SetAllPoints(row.rank)
+  row.rankHover:EnableMouse(true)
+  row.rankHover:SetScript("OnEnter", function(self) rankTooltip(self, row.entry) end)
+  row.rankHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  row.priority = priorityDropdown(row, function() return row.key and { row.key } end, function() return row.entry end,
+    function() if Options.RefreshBuffs then Options.RefreshBuffs() end end)
+  row.priority:SetPoint("LEFT", row.rank, "RIGHT", 4, 0)
+  row.visibility = visibilityDropdown(row, function() return row.key and { row.key } end)
+  row.visibility:SetPoint("LEFT", row.priority, "RIGHT", 6, 0)
   return row
 end
+
+local BUFF_WIDGETS = { "show", "sound", "icon", "name", "rank", "rankHover", "priority", "visibility" }
 
 local function fillBuffRow(row, item)
   if item.kind == "header" then
     row.entry, row.key = nil, nil
     row.header:SetText(string.upper(item.text)); row.header:Show()
-    row.check:Hide(); row.icon:Hide(); row.name:Hide(); row.priority:Hide(); row.note:Hide()
+    for _, w in ipairs(BUFF_WIDGETS) do row[w]:Hide() end
     return
   end
   local entry = FB.Data.byKey[item.key]
   row.entry, row.key = entry, item.key
   row.header:Hide()
-  row.check:Show(); row.icon:Show(); row.name:Show(); row.priority:Show(); row.note:Show()
-  row.check:SetChecked(entryEnabled(entry))
+  for _, w in ipairs(BUFF_WIDGETS) do row[w]:Show() end
+  row.show:SetChecked(shows(item.key))
+  row.sound:SetChecked(sounds(item.key))
   row.icon:SetTexture(entryIcon(entry))
   row.name:SetText(entryName(entry))
+  local notLearned = entry.class == playerClass() and not knowsEntry(entry) and playerLevel() < (entry.learnLevel or 1)
+  if notLearned then row.name:SetTextColor(0.6, 0.6, 0.6, 1) else row.name:SetTextColor(1, 1, 1, 1) end
+  row.rank:SetText(rankText(entry))
   row.priority.Refresh()
-  local known = knowsEntry(entry)
-  if entry.class == playerClass() and not known and (playerLevel() < (entry.learnLevel or 1)) then
-    row.note:SetText("learned at level " .. tostring(entry.learnLevel))
-    row.name:SetTextColor(0.6, 0.6, 0.6, 1)
-  else
-    row.note:SetText(PRIORITY_NOTE[effectivePriority(entry)] or "")
-    row.name:SetTextColor(1, 1, 1, 1)
-  end
+  row.visibility.Refresh()
   Options.buffRows[item.key] = row
 end
 
@@ -440,11 +594,16 @@ end
 function Options.BuildBuffs(panel)
   Options.buffRows = {}
   local hint = UI.SectionHeader(panel, "")
-  hint:SetText("Priority sets icon size and alerts. High: bigger, gold, flashes and sounds. Normal: follows the alert style. Low: smaller and silent.")
-  hint:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0); hint:SetWidth(540); hint:SetJustifyH("LEFT"); hint:SetWordWrap(true); hint:SetHeight(28)
+  hint:SetText("Show = icon in the bar.  Sound = alerts, repeats and screen text.  Priority sets size and which alert settings apply.  Hover a rank for every rank and its level.")
+  hint:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0); hint:SetWidth(620); hint:SetJustifyH("LEFT"); hint:SetWordWrap(true); hint:SetHeight(28)
+  local cols = { { "Show", 0 }, { "Sound", 22 }, { "Buff", 76 }, { "Rank", 232 }, { "Priority", 388 }, { "Visible", 494 } }
+  for _, c in ipairs(cols) do
+    local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fs:SetPoint("TOPLEFT", panel, "TOPLEFT", c[2], -30); fs:SetText(c[1]); muted(fs)
+  end
   local list = UI.ScrollList(panel, 28, buildBuffRow, fillBuffRow, { virtual = false })
-  list:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -34)
-  list:SetSize(Options.WIDTH - Options.TABS_WIDTH - 30, Options.HEIGHT - 44 - 12 - 34)
+  list:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -46)
+  list:SetSize(Options.WIDTH - Options.TABS_WIDTH - 30, Options.HEIGHT - 44 - 12 - 46)
   Options.buffList = list
   function Options.RefreshBuffs()
     Options.buffRows = {}
@@ -460,8 +619,13 @@ local CATEGORY_LABEL = { elixir = "Elixir", flask = "Flask", well_fed = "Well Fe
 local CATEGORY_ORDER = { "elixir", "flask", "well_fed", "weapon" }
 local CATEGORY_KEYS = { elixir = { "elixir" }, flask = { "flask" }, well_fed = { "well_fed" }, weapon = { "weapon_mh", "weapon_oh" } }
 local CATEGORY_MAIN_KEY = { elixir = "elixir", flask = "flask", well_fed = "well_fed", weapon = "weapon_mh" }
+local WHERE_CHOICES = {
+  { value = "everywhere", text = "Everywhere" }, { value = "instances", text = "Dungeons and raids" },
+  { value = "raids", text = "Raids only" }, { value = "never", text = "Never" },
+}
 
 Options.filterText = ""
+Options.collapsed = Options.collapsed or { elixir = false, flask = false, well_fed = true, weapon = true }
 
 local function categoryVisible(cat)
   local entry = FB.Data.byKey[CATEGORY_MAIN_KEY[cat]]
@@ -469,37 +633,83 @@ local function categoryVisible(cat)
 end
 
 local function pureRecommendation(cat)
-  local state = FB.Core and FB.Core.state
-  if not state then return nil end
-  return FB.Data.Recommend(CATEGORY_MAIN_KEY[cat], state.env.playerClass(), state:Role(), state.env.playerLevel(), state.env.weaponKind())
+  local s = state()
+  if not s then return nil end
+  return FB.Data.Recommend(CATEGORY_MAIN_KEY[cat], s.env.playerClass(), s:Role(), s.env.playerLevel(), s.env.weaponKind())
+end
+
+local function sourceShort(src)
+  if not src then return "Unknown" end
+  if src.kind == "crafted" then
+    if src.profession and src.skill then return src.profession .. " " .. src.skill end
+    return src.profession or "Crafted"
+  end
+  return (src.kind:gsub("^%l", string.upper))
+end
+
+local function itemTooltip(owner, r)
+  if not r then return end
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:SetText(FB.API.ItemName(r.itemID) or r.name)
+  GameTooltip:AddLine(r.summary or "", 1, 1, 1, true)
+  GameTooltip:AddLine("Requires level " .. tostring(r.level), 0.8, 0.8, 0.8)
+  local src = r.source
+  if not src then
+    GameTooltip:AddLine("Source: unknown", 0.7, 0.7, 0.7)
+  elseif src.kind == "crafted" then
+    GameTooltip:AddLine("Crafted: " .. sourceShort(src) .. (src.skill and "" or " (trainer recipe)"), 1, 0.82, 0)
+    for _, reg in ipairs(src.reagents or {}) do
+      GameTooltip:AddLine(string.format("  %dx %s", reg.count, FB.API.ItemName(reg.itemID) or reg.name), 0.9, 0.9, 0.9)
+    end
+  else
+    GameTooltip:AddLine("Source: " .. sourceShort(src), 1, 0.82, 0)
+    if src.note then GameTooltip:AddLine(src.note, 0.8, 0.8, 0.8, true) end
+  end
+  if r.resolvedSpell then GameTooltip:AddLine("Buff spell " .. r.resolvedSpell, 0.5, 0.5, 0.5) end
+  GameTooltip:Show()
 end
 
 local function buildConsumableRow(parent)
   local row = CreateFrame("Frame", nil, parent)
+  row:EnableMouse(true)
+  row:SetScript("OnEnter", function(self) if row.item then itemTooltip(self, row.item) end end)
+  row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  local function keys() return row.category and CATEGORY_KEYS[row.category] end
   -- header widgets
-  row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-  row.check:SetSize(22, 22)
-  row.check:SetPoint("LEFT", row, "LEFT", 0, 0)
-  row.check:SetScript("OnClick", function(self)
+  row.toggle = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+  row.toggle:SetSize(20, 20)
+  row.toggle:SetPoint("LEFT", row, "LEFT", 0, 0)
+  row.toggle:SetScript("OnClick", function()
     local cat = row.category; if not cat then return end
-    local main = FB.Data.byKey[CATEGORY_MAIN_KEY[cat]]
-    local nv = not entryEnabled(main)
-    for _, key in ipairs(CATEGORY_KEYS[cat]) do FB.cdb.enabled[key] = nv end
-    self:SetChecked(nv)
-    changed()
+    Options.collapsed[cat] = not Options.collapsed[cat]
+    if Options.RefreshConsumables then Options.RefreshConsumables() end
   end)
+  row.show = checkButton(row, function(self)
+    local k = keys(); if not k then return end
+    local nv = not shows(k[1]); setShows(k, nv); self:SetChecked(nv)
+  end)
+  row.show:SetPoint("LEFT", row.toggle, "RIGHT", 4, 0)
+  row.sound = checkButton(row, function(self)
+    local k = keys(); if not k then return end
+    local nv = not sounds(k[1]); setSounds(k, nv); self:SetChecked(nv)
+  end)
+  row.sound:SetPoint("LEFT", row.show, "RIGHT", 2, 0)
   row.header = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  row.header:SetPoint("LEFT", row.check, "RIGHT", 4, 0)
-  row.priority = UI.Dropdown(row, nil, choices(PRIORITY_CHOICES),
-    function() local k = row.category and CATEGORY_MAIN_KEY[row.category]; return k and FB.cdb.priority[k] or "default" end,
-    function(v)
-      local cat = row.category; if not cat then return end
-      for _, key in ipairs(CATEGORY_KEYS[cat]) do
-        if v == "default" then FB.cdb.priority[key] = nil else FB.cdb.priority[key] = v end
-      end
-      changed()
-    end, 100)
-  row.priority:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+  row.header:SetPoint("LEFT", row.sound, "RIGHT", 6, 0)
+  row.header:SetWidth(130); row.header:SetJustifyH("LEFT")
+  row.whereDropdown = UI.Dropdown(row, nil, choices(WHERE_CHOICES), function()
+    local cat = row.category; if not cat then return "instances" end
+    return FB.State.ScopeOf(FB.Data, FB.cdb or {}, CATEGORY_MAIN_KEY[cat])
+  end, function(v)
+    local cat = row.category; if not cat then return end
+    FB.cdb.consumableWhere[cat] = v
+    changed()
+  end, 140)
+  row.whereDropdown:SetPoint("LEFT", row.header, "RIGHT", 4, 0)
+  row.priority = priorityDropdown(row, keys, function() return row.category and FB.Data.byKey[CATEGORY_MAIN_KEY[row.category]] end)
+  row.priority:SetPoint("LEFT", row.whereDropdown, "RIGHT", 6, 0)
+  row.visibility = visibilityDropdown(row, keys)
+  row.visibility:SetPoint("LEFT", row.priority, "RIGHT", 6, 0)
   -- "use recommendation" widgets
   row.useRecommendation = UI.Button(row, "Use recommendation", function()
     local cat = row.category; if not cat then return end
@@ -511,8 +721,8 @@ local function buildConsumableRow(parent)
   -- item widgets
   row.radio = CreateFrame("CheckButton", nil, row, "UIRadioButtonTemplate")
   row.radio:SetSize(16, 16)
-  row.radio:SetPoint("LEFT", row, "LEFT", 6, 0)
-  row.radio:SetScript("OnClick", function(self)
+  row.radio:SetPoint("LEFT", row, "LEFT", 26, 0)
+  row.radio:SetScript("OnClick", function()
     local cat, item = row.category, row.item; if not (cat and item) then return end
     FB.cdb.pick[cat] = item.itemID
     changed()
@@ -525,17 +735,21 @@ local function buildConsumableRow(parent)
   row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
   row.name:SetWidth(200); row.name:SetJustifyH("LEFT"); singleLine(row.name, 24)
+  row.where = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  row.where:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
+  row.where:SetWidth(100); row.where:SetJustifyH("LEFT"); singleLine(row.where, 24)
   row.summary = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  row.summary:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
-  row.summary:SetWidth(190); row.summary:SetJustifyH("LEFT"); singleLine(row.summary, 24)
-  row.summary:SetTextColor(UI.COLORS.muted[1], UI.COLORS.muted[2], UI.COLORS.muted[3], 1)
+  row.summary:SetPoint("LEFT", row.where, "RIGHT", 6, 0)
+  row.summary:SetWidth(170); row.summary:SetJustifyH("LEFT"); singleLine(row.summary, 24)
+  muted(row.summary)
   row.tag = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.tag:SetPoint("RIGHT", row, "RIGHT", -8, 0)
   singleLine(row.tag, 24)
   return row
 end
 
-local ROW_WIDGETS = { "check", "header", "priority", "useRecommendation", "radio", "icon", "name", "summary", "tag" }
+local ROW_WIDGETS = { "toggle", "show", "sound", "header", "whereDropdown", "priority", "visibility",
+                      "useRecommendation", "radio", "icon", "name", "where", "summary", "tag" }
 local function showOnly(row, ...)
   local on = {}
   for i = 1, select("#", ...) do on[select(i, ...)] = true end
@@ -547,27 +761,32 @@ end
 local function fillConsumableRow(row, item)
   row.category = item.category
   row.item = nil
+  local cat = item.category
+  Options.consumableHeaders[cat] = Options.consumableHeaders[cat] or {}
+  local h = Options.consumableHeaders[cat]
   if item.kind == "header" then
-    showOnly(row, "check", "header", "priority")
-    row.check:SetChecked(entryEnabled(FB.Data.byKey[CATEGORY_MAIN_KEY[item.category]]))
-    row.header:SetText(CATEGORY_LABEL[item.category])
-    row.priority.Refresh()
-    Options.consumableHeaders[item.category] = Options.consumableHeaders[item.category] or {}
-    local h = Options.consumableHeaders[item.category]
-    h.check, h.priority, h.row = row.check, row.priority, row
+    showOnly(row, "toggle", "show", "sound", "header", "whereDropdown", "priority", "visibility")
+    local main = CATEGORY_MAIN_KEY[cat]
+    row.toggle:SetText(Options.collapsed[cat] and "+" or "-")
+    row.show:SetChecked(shows(main))
+    row.sound:SetChecked(sounds(main))
+    row.header:SetText(CATEGORY_LABEL[cat])
+    row.whereDropdown.Refresh(); row.priority.Refresh(); row.visibility.Refresh()
+    h.toggle, h.show, h.sound, h.where, h.priority, h.visibility, h.row =
+      row.toggle, row.show, row.sound, row.whereDropdown, row.priority, row.visibility, row
   elseif item.kind == "use" then
     showOnly(row, "useRecommendation")
-    Options.consumableHeaders[item.category] = Options.consumableHeaders[item.category] or {}
-    Options.consumableHeaders[item.category].useRecommendation = row.useRecommendation
+    h.useRecommendation = row.useRecommendation
   else
-    showOnly(row, "radio", "icon", "name", "summary", "tag")
+    showOnly(row, "radio", "icon", "name", "where", "summary", "tag")
     local r = item.row
     row.item = r
-    local pick = FB.cdb.pick[item.category]
+    local pick = FB.cdb.pick[cat]
     local rec = item.recommended
     row.radio:SetChecked(pick == r.itemID)
     row.icon:SetTexture(FB.API.ItemIcon(r.itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
     row.name:SetText(string.format("%s  |cff8b93a5lvl %d|r", FB.API.ItemName(r.itemID) or r.name, r.level))
+    row.where:SetText(sourceShort(r.source))
     row.summary:SetText(r.summary or "")
     if pick == r.itemID then
       row.tag:SetText("your pick"); row.tag:SetTextColor(1, 0.9, 0.5, 1)
@@ -576,8 +795,7 @@ local function fillConsumableRow(row, item)
     else
       row.tag:SetText("")
     end
-    local tooHigh = r.level > playerLevel()
-    local shade = tooHigh and 0.55 or 1
+    local shade = (r.level > playerLevel()) and 0.55 or 1
     row.name:SetTextColor(shade, shade, shade, 1)
     Options.consumableRows[r.itemID] = row
   end
@@ -589,11 +807,14 @@ local function consumableItems()
   for _, cat in ipairs(CATEGORY_ORDER) do
     if categoryVisible(cat) then
       items[#items + 1] = { kind = "header", category = cat }
-      items[#items + 1] = { kind = "use", category = cat }
-      local rec = pureRecommendation(cat)
-      for _, r in ipairs(FB.Data.CATALOGUE[cat]) do
-        if filter == "" or string.find(string.lower(r.name), filter, 1, true) then
-          items[#items + 1] = { kind = "item", category = cat, row = r, recommended = rec }
+      local open = not Options.collapsed[cat] or filter ~= ""
+      if open then
+        items[#items + 1] = { kind = "use", category = cat }
+        local rec = pureRecommendation(cat)
+        for _, r in ipairs(FB.Data.CATALOGUE[cat]) do
+          if filter == "" or string.find(string.lower(r.name), filter, 1, true) then
+            items[#items + 1] = { kind = "item", category = cat, row = r, recommended = rec }
+          end
         end
       end
     end
@@ -613,14 +834,9 @@ function Options.BuildConsumables(panel)
     function() return (FB.cdb and FB.cdb.role) or FB.Data.DefaultRole(playerClass()) end,
     cdbSet("role", function() if Options.RefreshConsumables then Options.RefreshConsumables() end end), 110))
   role:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
-  local where = register("consumablesWhere", UI.Dropdown(panel, "Show consumables", choices({
-    { value = "raids", text = "Raids only" }, { value = "everywhere", text = "Everywhere" },
-  }), function() if FB.cdb and FB.cdb.consumablesRaidsOnly == false then return "everywhere" end; return "raids" end,
-    function(v) FB.cdb.consumablesRaidsOnly = (v ~= "everywhere"); changed() end, 130))
-  where:SetPoint("TOPLEFT", role, "TOPRIGHT", 10, 0)
-  local remind = register("consumablesRemindDrop", UI.Checkbox(panel, "Remind when it wears off",
+  local remind = register("consumablesRemindDrop", UI.Checkbox(panel, "Remind anywhere once one wears off",
     cdbGet("consumablesRemindDrop", true), cdbSet("consumablesRemindDrop")))
-  remind:SetPoint("BOTTOMLEFT", where, "BOTTOMRIGHT", 10, 0)
+  remind:SetPoint("BOTTOMLEFT", role, "BOTTOMRIGHT", 12, 0)
   local filter = register("filter", UI.EditBox(panel, "", 160, true, function(text)
     Options.filterText = text or ""
     if Options.RefreshConsumables then Options.RefreshConsumables() end
@@ -629,7 +845,7 @@ function Options.BuildConsumables(panel)
   local filterLabel = UI.SectionHeader(panel, "Filter")
   filterLabel:SetPoint("BOTTOMLEFT", filter, "TOPLEFT", 0, 2)
 
-  local list = UI.ScrollList(panel, 24, buildConsumableRow, fillConsumableRow, { virtual = false })
+  local list = UI.ScrollList(panel, 26, buildConsumableRow, fillConsumableRow, { virtual = false })
   list:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -50)
   list:SetSize(Options.WIDTH - Options.TABS_WIDTH - 30, Options.HEIGHT - 44 - 12 - 50)
   Options.consumableList = list

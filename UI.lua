@@ -130,6 +130,17 @@ local function closeOpenList()
 end
 UI.CloseDropdowns = closeOpenList
 
+-- Close an open dropdown list on any click outside it or its button.
+local outsideWatcher = CreateFrame("Frame")
+pcall(outsideWatcher.RegisterEvent, outsideWatcher, "GLOBAL_MOUSE_DOWN")
+outsideWatcher:SetScript("OnEvent", function()
+  local list = openList
+  if not list then return end
+  local overList = list.IsMouseOver and list:IsMouseOver()
+  local overOwner = list.owner and list.owner.IsMouseOver and list.owner:IsMouseOver()
+  if not overList and not overOwner then closeOpenList() end
+end)
+
 function UI.Dropdown(parent, label, choicesFn, get, set, width)
   local f = CreateFrame("Frame", nil, parent)
   width = width or 180
@@ -201,6 +212,7 @@ function UI.Dropdown(parent, label, choicesFn, get, set, width)
       b:Show()
     end
     for i = #choices + 1, #list.buttons do list.buttons[i]:Hide() end
+    list.owner = button
     list:Show()
     openList = list
   end
