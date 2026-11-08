@@ -211,3 +211,12 @@ T.test("grid overlay shows on unlock and hides on lock", function()
   FB.db.showGridWhileUnlocked = true; FB.db.gridSize = 64; FB.Core.Slash("unlock"); local n64 = 0
   for _, l in ipairs(ForeverBuffsGrid.lines) do if l:IsShown() then n64 = n64 + 1 end end; T.truthy(n64 < 60)
 end)
+T.test("FIX: snapping uses centre-relative coordinates when the frame reports its edges", function()
+  STUB.reset(); local s = settings({ snapToGrid = true, gridSize = 16 }); FB.Display.Init(s)
+  local a = FB.Display.anchor
+  a.GetLeft = function() return 1000 + 37 end; a.GetTop = function() return 600 - 55 end
+  local saved = UIParent.GetCenter; UIParent.GetCenter = function() return 1000, 600 end
+  a:SetPoint("LEFT", UIParent, "LEFT", 296, -142); FB.Display.SavePosition(s)
+  UIParent.GetCenter = saved
+  T.eq(s.position.point, "TOPLEFT"); T.eq(s.position.relPoint, "CENTER"); T.eq(s.position.x, 32); T.eq(s.position.y, -48)
+end)

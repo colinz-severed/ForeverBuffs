@@ -328,6 +328,26 @@ function Core.Run(opts)
   Core.Render()
 end
 
+Core.deferredExpiring = {}
+
+-- After combat: running-out alerts for buffs that crossed the threshold during
+-- the fight and are still running out (a buff that dropped alerts as missing).
+function Core.DeliverDeferredExpiring()
+  if not Core.state then Core.deferredExpiring = {}; return end
+  local transitions = {}
+  for key in pairs(Core.deferredExpiring) do
+    if Core.state.status[key] == "expiring" then
+      transitions[#transitions + 1] = { key = key, from = "present", to = "expiring" }
+    end
+  end
+  Core.deferredExpiring = {}
+  if #transitions > 0 then
+    local ctx = Core.AlertContext()
+    ctx.inCombat = false
+    FB.Alerts.Deliver(Core.alerts:Decide(transitions, Core.state, ctx))
+  end
+end
+
 function Core.AlertContext()
   return {
     channels = FB.db.alert, alertOnExpiring = FB.db.alertOnExpiring ~= false,
@@ -342,7 +362,12 @@ function Core.Tick()
   if not Core.state then return end
   local inCombat = Core.inCombat or InCombatLockdown()
   local transitions = Core.state:UpdateExpiring(GetTime())
-  if not inCombat then
+  if inCombat then
+    -- Running-out alerts are not played in combat; keep them for afterwards.
+    for _, t in ipairs(transitions) do
+      if t.from == "present" and t.to == "expiring" then Core.deferredExpiring[t.key] = true end
+    end
+  else
     local ctx = Core.AlertContext()
     FB.Alerts.Deliver(Core.alerts:Decide(transitions, Core.state, ctx))
     FB.Alerts.Deliver(Core.alerts:DueRepeats(Core.state, ctx))
@@ -431,7 +456,7 @@ local function onLogin()
   Core.ticker = C_Timer.NewTicker(Core.TICK_SECONDS, function() Core.Tick() end)
 end
 
-frame:SetScript("OnEvent", function(self, event, arg1)
+frame:SetScript("OnEvent", function(self, event, arg1, arg2)
   if event == "PLAYER_LOGIN" then
     onLogin()
   elseif event == "PLAYER_ENTERING_WORLD" then
@@ -451,11 +476,15 @@ frame:SetScript("OnEvent", function(self, event, arg1)
     Core.Render()
   elseif event == "PLAYER_REGEN_ENABLED" then
     Core.inCombat = false
+    Core.DeliverDeferredExpiring()
     Core.Refresh()
   elseif event == "ITEM_DATA_LOAD_RESULT" then
     if arg1 and FB.API.ItemSpellPending[arg1] then
-      FB.Data.ResolveItemSpells(FB.API.ItemSpell, { [arg1] = true })
-      Core.Refresh()
+      FB.API.ItemSpellPending[arg1] = nil
+      if arg2 then
+        local added = FB.Data.ResolveItemSpells(function(id) return FB.API.ItemSpell(id, true) end, { [arg1] = true })
+        if added > 0 then Core.Refresh() end
+      end
     end
   elseif event == "UNIT_AURA" or event == "UNIT_INVENTORY_CHANGED" then
     if arg1 == "player" then Core.Refresh() end

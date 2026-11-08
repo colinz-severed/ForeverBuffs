@@ -193,10 +193,21 @@ function API.TempEnchantDetail(slot)
       types[#types + 1] = (IsSecret(t) and "secret") or tostring(t)
     end
   end
-  return string.format("slot %d: temp=%s%s list=%s%s", slot,
+  local function keysOf(t)
+    if type(t) ~= "table" or IsSecret(t) then return "-" end
+    local ks = {}
+    for k in pairs(t) do ks[#ks + 1] = tostring(k) end
+    table.sort(ks)
+    return #ks > 0 and table.concat(ks, ",") or "-"
+  end
+  local tempInfo
+  local tfn = resolve("C_PaperDollInfo.GetTemporaryEnchantmentInfo")
+  if tfn then local okT, info = pcall(tfn, slot); if okT then tempInfo = info end end
+  return string.format("slot %d: temp=%s%s list=%s%s tempKeys=%s listKeys=%s remaining=%s", slot,
     present and "yes" or "no", available and "" or " (no API)",
     list and tostring(#list) or "n/a",
-    #types > 0 and (" types=" .. table.concat(types, ",")) or "")
+    #types > 0 and (" types=" .. table.concat(types, ",")) or "",
+    keysOf(tempInfo), keysOf(list and list[1]), tostring(API.WeaponRemaining and API.WeaponRemaining(slot)))
 end
 
 local function slotItemInfo(slot)
@@ -345,7 +356,9 @@ end
 -- The spell an item casts (for a consumable: the buff it gives), or nil.
 -- Requests item data when the client has not cached the item yet.
 API.ItemSpellPending = {}
-function API.ItemSpell(itemID)
+-- noRequest: do not ask the client to load the item (used when answering
+-- ITEM_DATA_LOAD_RESULT, so an item that does not exist cannot loop).
+function API.ItemSpell(itemID, noRequest)
   local fn = resolve("C_Item.GetItemSpell")
   if not fn then return nil end
   local ok, _, spellID = pcall(fn, itemID)
@@ -353,6 +366,7 @@ function API.ItemSpell(itemID)
     API.ItemSpellPending[itemID] = nil
     return spellID
   end
+  if noRequest then return nil end
   local req = resolve("C_Item.RequestLoadItemDataByID")
   if req then pcall(req, itemID); API.ItemSpellPending[itemID] = true end
   return nil

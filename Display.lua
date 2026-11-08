@@ -221,6 +221,14 @@ function Display.SavePosition(settings)
   if not anchor then return end
   local point, _, relPoint, x, y = anchor:GetPoint()
   if not point then return end
+  -- Store the anchor's top-left relative to the screen centre, the same origin
+  -- the alignment grid is drawn from, so snapped positions sit on its lines at
+  -- any UI scale. (After a drag the engine may report any nearest point.)
+  local left, top = anchor:GetLeft(), anchor:GetTop()
+  local cx, cy = UIParent:GetCenter()
+  if type(left) == "number" and type(top) == "number" and type(cx) == "number" and type(cy) == "number" then
+    point, relPoint, x, y = "TOPLEFT", "CENTER", left - cx, top - cy
+  end
   x, y = math.floor((x or 0) + 0.5), math.floor((y or 0) + 0.5)
   if settings.snapToGrid then
     local g = settings.gridSize or 16
@@ -330,6 +338,9 @@ local function visibleKeys(state, settings, opts)
       elseif mode == "expiring" then show = (status == "missing" or status == "expiring")
       else show = (status == "missing") end
     end
+    -- The Show tick decides whether the icon is in the bar at all (an entry can
+    -- be tracked for its sound only).
+    if show and state.Shows and not state:Shows(key) then show = false end
     if show then out[#out + 1] = key end
   end
   return out

@@ -447,6 +447,18 @@ local function visibilityDropdown(parent, keysFn, onChange)
   end, 120)
 end
 
+-- Ticking Sound on an entry whose priority channel has neither a sound nor
+-- screen text would do nothing; say so instead of failing silently.
+local function warnIfSilent(key)
+  local entry = FB.Data.byKey[key]; if not entry then return end
+  local prio = (FB.cdb.priority and FB.cdb.priority[key]) or defaultPriority(entry)
+  local c = FB.db.alert and FB.db.alert[prio] or {}
+  if (c.sound == nil or c.sound == "none") and not c.text then
+    print("|cff33ff99ForeverBuffs|r: " .. (PRIORITY_TEXT[prio] or prio) .. " priority has no sound or screen text set."
+      .. " Pick one on the Alerts tab, or give this buff a higher priority.")
+  end
+end
+
 local function setShows(keys, value)
   for _, k in ipairs(keys) do FB.cdb.show[k] = value end
   changed()
@@ -454,6 +466,7 @@ end
 local function setSounds(keys, value)
   for _, k in ipairs(keys) do FB.cdb.sound[k] = value end
   changed()
+  if value and keys[1] then warnIfSilent(keys[1]) end
 end
 
 -------------------------------------------------------------------------------

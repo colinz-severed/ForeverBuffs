@@ -104,3 +104,7 @@ T.test("ScreenText uses the raid warning frame, else the errors frame", function
   STUB.reset(); FB.API.ScreenText("Inner Fire missing!", 1, 0.8, 0); T.eq(STUB.raidNotices[1].text, "Inner Fire missing!"); T.eq(STUB.raidNotices[1].frame, RaidWarningFrame)
   local saved = RaidNotice_AddMessage; RaidNotice_AddMessage = nil; FB.API.ScreenText("x", 1, 0, 0); T.eq(STUB.errorsFrame[1].text, "x"); RaidNotice_AddMessage = saved
 end)
+T.test("FIX: TempEnchantDetail lists the fields the client returns", function()
+  STUB.reset(); STUB.tempEnchant[16] = { enchantID=5, remainingTimeMs=1000 }; STUB.weaponEnchants[0] = { { hasEnchant=true, enchantType=2, timeLeft=60000 } }
+  local d = FB.API.TempEnchantDetail(16); T.truthy(d:find("tempKeys=", 1, true) and d:find("remainingTimeMs", 1, true)); T.truthy(d:find("listKeys=", 1, true) and d:find("timeLeft", 1, true))
+end)

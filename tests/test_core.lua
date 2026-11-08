@@ -186,3 +186,23 @@ T.test("report includes catalogue spell resolution and rank spells", function()
   local cat = table.concat(r.catalogue, "\n"); T.truthy(cat:find("13454", 1, true) and cat:find("spell 17539", 1, true)); T.truthy(cat:find("unresolved", 1, true))
   local ranks = table.concat(r.ranks, "\n"); T.truthy(ranks:find("1243 -> Power Word: Fortitude", 1, true)); T.truthy(ranks:find("UNKNOWN", 1, true))
 end)
+T.test("FIX: Show off hides the icon while Sound still alerts", function()
+  STUB.reload(); STUB.known[588] = true; STUB.auras[588] = { sourceUnit="player" }; FB.cdb.show.inner_fire = false; FB.cdb.priority.inner_fire = "high"
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
+  for _, ic in ipairs(FB.Display.icons) do T.falsy(ic:IsShown() and ic.key == "inner_fire") end
+  STUB.auras[588] = nil; STUB.fire("UNIT_AURA", "player"); STUB.advance(0.3); T.eq(#STUB.sounds, 1)
+  for _, ic in ipairs(FB.Display.icons) do T.falsy(ic:IsShown() and ic.key == "inner_fire") end
+end)
+T.test("FIX: failed or empty item data loads do not re-request", function()
+  STUB.reload(); local n = #STUB.itemRequests; T.truthy(FB.API.ItemSpellPending[247754])
+  STUB.fire("ITEM_DATA_LOAD_RESULT", 247754, false); T.eq(#STUB.itemRequests, n); T.falsy(FB.API.ItemSpellPending[247754])
+  STUB.fire("ITEM_DATA_LOAD_RESULT", 250337, true); T.eq(#STUB.itemRequests, n)
+end)
+T.test("FIX: running-out crossed in combat alerts after combat", function()
+  STUB.reload(); STUB.known[588] = true; FB.cdb.priority.inner_fire = "high"
+  STUB.auras[588] = { sourceUnit="player", expirationTime = 100, duration = 600 }
+  STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5); T.eq(FB.Core.state.status.inner_fire, "present")
+  STUB.player.combat = true; STUB.fire("PLAYER_REGEN_DISABLED"); STUB.advance(40); T.eq(FB.Core.state.status.inner_fire, "expiring"); T.eq(#STUB.sounds, 0)
+  STUB.player.combat = false; STUB.fire("PLAYER_REGEN_ENABLED"); STUB.advance(0.3); T.eq(#STUB.sounds, 1)
+  T.truthy(STUB.raidNotices[1].text:find("runs out", 1, true))
+end)
