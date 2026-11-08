@@ -11,6 +11,7 @@
 ## SavedVariables: ForeverBuffsDB
 ## SavedVariablesPerCharacter: ForeverBuffsCharDB
 
+DataGen.lua
 Data.lua
 API.lua
 State.lua

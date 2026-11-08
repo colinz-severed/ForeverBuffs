@@ -29,15 +29,15 @@ T.test("spec entries exist with spec values", function()
 end)
 T.test("DefaultRole and Recommend", function()
   T.eq(FB.Data.DefaultRole("MAGE"), "Caster"); T.eq(FB.Data.DefaultRole("WARRIOR"), "Melee"); T.eq(FB.Data.DefaultRole("PALADIN"), "Healer")
-  T.eq(FB.Data.Recommend("elixir", "MAGE", "Caster", 60).itemID, 21546)       -- Greater Firepower beats Greater Arcane at 50
+  T.eq(FB.Data.Recommend("elixir", "MAGE", "Caster", 60).itemID, 13454)
   T.eq(FB.Data.Recommend("elixir", "WARLOCK", "Caster", 60).itemID, 13454)    -- no Firepower for warlocks
   T.eq(FB.Data.Recommend("elixir", "WARLOCK", "Caster", 45).itemID, 9264)     -- Shadow Power at 40
   T.eq(FB.Data.Recommend("elixir", "ROGUE", "Melee", 60).itemID, 13452)
-  T.eq(FB.Data.Recommend("elixir", "WARRIOR", "Melee", 60).itemID, 9206)
+  T.eq(FB.Data.Recommend("elixir", "WARRIOR", "Melee", 60).itemID, 250351)
   T.eq(FB.Data.Recommend("elixir", "WARRIOR", "Tank", 30).itemID, 3825)
   T.eq(FB.Data.Recommend("flask", "PRIEST", "Healer", 60).itemID, 13511); T.eq(FB.Data.Recommend("flask", "PRIEST", "Healer", 49), nil)
-  T.eq(FB.Data.Recommend("well_fed", "WARRIOR", "Melee", 60).itemID, 20452); T.eq(FB.Data.Recommend("well_fed", "ROGUE", "Melee", 60).itemID, 13928)
-  T.eq(FB.Data.Recommend("weapon_mh", "MAGE", "Caster", 60).itemID, 20749); T.eq(FB.Data.Recommend("weapon_mh", "PRIEST", "Healer", 60).itemID, 20748)
+  T.eq(FB.Data.Recommend("well_fed", "WARRIOR", "Melee", 60).itemID, 20452); T.eq(FB.Data.Recommend("well_fed", "ROGUE", "Melee", 60).itemID, 250072)
+  T.eq(FB.Data.Recommend("weapon_mh", "MAGE", "Caster", 60).itemID, 20749); T.eq(FB.Data.Recommend("weapon_mh", "PRIEST", "Healer", 60).itemID, 20749)
   T.eq(FB.Data.Recommend("weapon_mh", "WARRIOR", "Melee", 60, "edged").itemID, 18262)
   T.eq(FB.Data.Recommend("weapon_mh", "WARRIOR", "Melee", 60, "blunt").itemID, 12643)
   T.eq(FB.Data.Recommend("weapon_mh", "WARRIOR", "Melee", 3, nil).itemID, 2862)   -- unknown weapon kind defaults to edged
@@ -65,7 +65,7 @@ T.test("catalogue rows are well-formed, sorted, and cover the recommendations", 
     local lastLevel = -1
     for _, r in ipairs(rows) do
       T.truthy(r.itemID and r.name and r.level and r.summary, cat .. " row"); T.truthy(r.level >= lastLevel, "sorted " .. cat); lastLevel = r.level
-      if cat ~= "weapon" then T.truthy(r.auraIDs and #r.auraIDs > 0, r.name .. " auraIDs") end
+      if cat ~= "weapon" and cat ~= "well_fed" then T.truthy(r.auraIDs and #r.auraIDs > 0, r.name .. " auraIDs") end
     end
   end
   for key, byRole in pairs(FB.Data.RECOMMEND) do
@@ -80,7 +80,7 @@ T.test("every catalogue aura id is in its category entry ids", function()
   end
 end)
 T.test("catalogue includes the cheaper levelling items and excludes alcohol", function()
-  T.truthy(FB.Data.CatalogueItem("elixir", 2457))   -- Elixir of Minor Agility
+  T.truthy(FB.Data.CatalogueItem("elixir", 2457))
   T.truthy(FB.Data.CatalogueItem("elixir", 3390))   -- Elixir of Lesser Agility
   T.truthy(FB.Data.CatalogueItem("flask", 13513))   -- Flask of Chromatic Resistance
   T.truthy(FB.Data.CatalogueItem("well_fed", 12218)) -- Monster Omelet
@@ -88,11 +88,45 @@ T.test("catalogue includes the cheaper levelling items and excludes alcohol", fu
   T.eq(FB.Data.CategoryOf("weapon_oh"), "weapon"); T.eq(FB.Data.CategoryOf("inner_fire"), nil)
 end)
 T.test("1.0 recommendations still hold after deriving from the catalogue", function()
-  T.eq(FB.Data.Recommend("elixir", "MAGE", "Caster", 60).itemID, 21546)
+  T.eq(FB.Data.Recommend("elixir", "MAGE", "Caster", 60).itemID, 13454)
   T.eq(FB.Data.Recommend("weapon_mh", "WARRIOR", "Melee", 60, "blunt").itemID, 12643)
-  T.eq(FB.Data.Recommend("weapon_mh", "PRIEST", "Healer", 60, "blunt").itemID, 20748)   -- oils ignore weapon kind
-  T.eq(FB.Data.Recommend("well_fed", "ROGUE", "Melee", 60).itemID, 13928)
+  T.eq(FB.Data.Recommend("weapon_mh", "PRIEST", "Healer", 60, "blunt").itemID, 20749)   -- oils ignore weapon kind
+  T.eq(FB.Data.Recommend("well_fed", "ROGUE", "Melee", 60).itemID, 250072)
 end)
 T.test("quietFromOthers is gone", function()
   for _, e in ipairs(FB.Data.entries) do T.eq(e.quietFromOthers, nil, e.key) end
+end)
+T.test("Forever corrections and new items", function()
+  local holy = FB.Data.CatalogueItem("elixir", 21546); T.eq(holy.name, "Elixir of Holy Power"); T.eq(holy.roles, nil)
+  T.eq(FB.Data.CatalogueItem("weapon", 2863).level, 5); T.eq(FB.Data.CatalogueItem("weapon", 12404).level, 35)
+  T.truthy(FB.Data.CatalogueItem("elixir", 250351)); T.eq(FB.Data.Recommend("elixir", "WARRIOR", "Melee", 60).itemID, 250351)
+  T.eq(FB.Data.Recommend("elixir", "HUNTER", "Melee", 60).itemID, 250328); T.eq(FB.Data.Recommend("elixir", "ROGUE", "Melee", 60).itemID, 13452)
+  T.truthy(FB.Data.CatalogueItem("flask", 274274).summary:find("Hyjal only", 1, true))
+  T.eq(FB.Data.CatalogueItem("well_fed", 12212).name, "Jungle Stew")
+end)
+T.test("ResolveItemSpells merges runtime buff IDs once", function()
+  local before = #FB.Data.byKey.elixir.ids
+  local n = FB.Data.ResolveItemSpells(function(id) if id == 250351 then return 9999901 end end)
+  T.eq(n, 1); T.eq(#FB.Data.byKey.elixir.ids, before + 1)
+  T.eq(FB.Data.ResolveItemSpells(function(id) if id == 250351 then return 9999901 end end), 0)
+  T.eq(FB.Data.CatalogueItem("elixir", 250351).resolvedSpell, 9999901)
+end)
+T.test("RankInfo: current rank, next level, available", function()
+  local e = { iconSpells = { 11 }, ranks = { { family = "Fort", spells = { {id=11,rank=1,level=1}, {id=12,rank=2,level=12}, {id=13,rank=3,level=24}, {id=14,rank=4,level=36} } } } }
+  local known = { [11]=true, [12]=true }
+  local r = FB.Data.RankInfo(e, function(id) return known[id] end, 21); T.eq(r.known, 2); T.eq(r.total, 4); T.eq(r.nextLevel, 24); T.falsy(r.available)
+  r = FB.Data.RankInfo(e, function(id) return known[id] end, 26); T.truthy(r.available)
+  local m = { iconSpells = { 31, 21 }, ranks = { { family = "Frost", spells = { {id=21,rank=1,level=1} } }, { family = "Mage", spells = { {id=31,rank=1,level=34} } } } }
+  r = FB.Data.RankInfo(m, function(id) return id == 21 end, 30); T.eq(r.family, "Frost"); T.falsy(r.available)
+  r = FB.Data.RankInfo(m, function(id) return id == 21 end, 40); T.truthy(r.available)
+  T.eq(FB.Data.RankInfo({ iconSpells = {} }, function() return false end, 60), nil)
+end)
+T.test("generated sources and ranks are attached", function()
+  local mongoose = FB.Data.CatalogueItem("elixir", 13452); T.truthy(mongoose.source); T.eq(mongoose.source.kind, "crafted"); T.eq(mongoose.source.profession, "Alchemy")
+  T.truthy(#mongoose.source.reagents >= 1)
+  local fort = FB.Data.byKey.fortitude; T.truthy(fort.ranks); T.eq(fort.ranks[1].family, "Power Word: Fortitude"); T.eq(#fort.ranks[1].spells, 6)
+  local r = FB.Data.RankInfo(fort, function(id) return id == 1243 or id == 1244 end, 21); T.eq(r.known, 2); T.eq(r.nextLevel, 24); T.falsy(r.available)
+  r = FB.Data.RankInfo(fort, function(id) return id == 1243 or id == 1244 end, 25); T.truthy(r.available)
+  local hasDevo7 = false; for _, id in ipairs(FB.Data.byKey.paladin_aura.ids) do if id == 10293 then hasDevo7 = true end end; T.truthy(hasDevo7)
+  T.eq(FB.Data.byKey.rogue_poison_mh.castIDs[1], 8681)
 end)

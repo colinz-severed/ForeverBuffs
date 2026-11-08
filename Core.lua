@@ -415,6 +415,10 @@ local function onLogin()
   Core.state = FB.State.New(FB.Data, Core.BuildEnv())
   Core.alerts = FB.Alerts.New()
   -- The options window is built on first open (/fbuffs), not at login.
+  -- Ask the game which buff each catalogue item gives; uncached items are
+  -- requested and resolved on ITEM_DATA_LOAD_RESULT.
+  FB.Data.ResolveItemSpells(FB.API.ItemSpell)
+  pcall(frame.RegisterEvent, frame, "ITEM_DATA_LOAD_RESULT")
 
   frame:RegisterEvent("PLAYER_ENTERING_WORLD")
   frame:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -448,6 +452,11 @@ frame:SetScript("OnEvent", function(self, event, arg1)
   elseif event == "PLAYER_REGEN_ENABLED" then
     Core.inCombat = false
     Core.Refresh()
+  elseif event == "ITEM_DATA_LOAD_RESULT" then
+    if arg1 and FB.API.ItemSpellPending[arg1] then
+      FB.Data.ResolveItemSpells(FB.API.ItemSpell, { [arg1] = true })
+      Core.Refresh()
+    end
   elseif event == "UNIT_AURA" or event == "UNIT_INVENTORY_CHANGED" then
     if arg1 == "player" then Core.Refresh() end
   elseif REFRESH_SET[event] then
