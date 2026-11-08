@@ -128,7 +128,7 @@ T.test("SettingChanged bumps revision and re-renders; open hooks exist", functio
 end)
 T.test("TOC metadata", function()
   local toc = io.open("ForeverBuffs.toc"):read("*a")
-  for _, line in ipairs({"## Version: 1.1.0", "## Author: colinzmulan", "## X-Credits: Claude AI assisted", "## AddonCompartmentFunc: ForeverBuffs_OpenOptions", "## X-BugReport: https://github.com/colinz-severed/ForeverBuffs/issues"}) do T.truthy(toc:find(line, 1, true), line) end
+  for _, line in ipairs({"## Version: 1.2.0", "## Author: colinzmulan", "## X-Credits: Claude AI assisted", "## AddonCompartmentFunc: ForeverBuffs_OpenOptions", "## X-BugReport: https://github.com/colinz-severed/ForeverBuffs/issues"}) do T.truthy(toc:find(line, 1, true), line) end
   T.truthy(toc:find("UI.lua\nOptions.lua", 1, true) or toc:find("UI.lua\r\nOptions.lua", 1, true))
 end)
 T.test("every 1.0 sound key migrates to a resolvable 1.1 key; unknown keys reset", function()
@@ -179,4 +179,10 @@ T.test("login resolves catalogue buff spells; late item data resolves pending it
   STUB.itemSpells[250337] = 7770002; STUB.fire("ITEM_DATA_LOAD_RESULT", 250337, true)
   found = false; for _, id in ipairs(FB.Data.byKey.elixir.ids) do if id == 7770002 then found = true end end; T.truthy(found)
   T.falsy(FB.API.ItemSpellPending[250337])
+end)
+T.test("report includes catalogue spell resolution and rank spells", function()
+  STUB.reload(function() STUB.itemSpells[13454] = 17539; STUB.spells[1243] = { name = "Power Word: Fortitude" } end)
+  FB.Core.Slash("report"); local r = FB.db.report
+  local cat = table.concat(r.catalogue, "\n"); T.truthy(cat:find("13454", 1, true) and cat:find("spell 17539", 1, true)); T.truthy(cat:find("unresolved", 1, true))
+  local ranks = table.concat(r.ranks, "\n"); T.truthy(ranks:find("1243 -> Power Word: Fortitude", 1, true)); T.truthy(ranks:find("UNKNOWN", 1, true))
 end)

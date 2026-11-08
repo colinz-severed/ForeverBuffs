@@ -19,7 +19,7 @@ Author: colinzmulan (Claude AI assisted).
 | `/fbuffs lock` | Locks and saves the position |
 | `/fbuffs test` | Toggles test mode: every tracked buff shows as missing |
 | `/fbuffs reset` | Puts the display back in the default spot |
-| `/fbuffs report` | Saves the api, ids and debug output to the saved variables (then `/reload`) |
+| `/fbuffs report` | Saves the api, ids, debug, catalogue and rank output to the saved variables (then `/reload`) |
 | `/fbuffs debug` | Prints what is tracked, why, and its current state |
 | `/fbuffs api` | Lists which game functions the addon found on this client |
 | `/fbuffs ids` | Lists every spell and item ID the addon uses with the name the client resolves |
@@ -30,26 +30,31 @@ Author: colinzmulan (Claude AI assisted).
 
 Opened with `/fbuffs`. Tabs down the left; ESC closes it; drag it by its title bar. Its opacity is a slider.
 
-- **Display**: style, icon size, spacing, grow direction, icons per row, names, High and Low sizes, window opacity.
-- **Alerts**: alert style for Normal priority, a sound for Normal and a sound for High (17 game sounds plus none), combat behaviour, hide while mounted or resting.
-- **Buffs**: every buff for your class and every group buff from other classes, each with an on/off tick and a priority.
-- **Consumables**: role, where consumables show, and the full list of flasks, elixirs, foods and weapon oils or stones. The recommended one is marked; tick your own pick to use a cheaper one instead.
-- **Position**: unlock/lock, reset, test mode.
+- **Display**: look (icons, names beside, names below), when icons show (always, only when missing, or when missing or running out), the running-out thresholds, icon size, spacing, grow direction, icons per row, High and Low sizes, window opacity.
+- **Alerts**: for each priority (High, Normal, Low) a sound with a Play button, how often to repeat while the buff is missing, a raid-warning text on screen, whether the icon flashes, and a Test button. Plus "alert once when a buff is running out", combat behaviour, and hiding while mounted or resting.
+- **Buffs**: every buff for your class and every group buff from other classes. Each has a Show tick (icon in the bar), a Sound tick (alerts, repeats and screen text), its rank ("Rank 3/6, next at 24", or "rank available!" when you can train a new one; hover for every rank and its level), a priority and a visibility override.
+- **Consumables**: role, and for each group (elixir, flask, Well Fed, weapon oil/stone) Show and Sound ticks, where it shows (everywhere, dungeons and raids, raids only, never), priority and visibility. Each group lists its items with level, where to get it ("Alchemy 165", "Cooking", "Vendor"), its effect, and the recommended one; hover for the recipe's reagents. Tick your own pick to use a cheaper one. Groups collapse.
+- **Position**: unlock/lock, reset, test mode, snap to grid, grid size, show the grid while unlocked.
 - **About**: version, author, bug-report and download links.
 
 ## Priority
 
-Every tracked buff has a priority. **High** icons are bigger with a gold border, always flash, and play the High sound. **Normal** icons follow the alert style. **Low** icons are smaller and never flash or sound. Your own buffs default to Normal; buffs other people give you and consumables default to Low, so they look secondary at a glance. Change any of them in the Buffs or Consumables tab.
+Every tracked buff has a priority. **High** icons are bigger with a gold border. **Low** icons are smaller. Each priority has its own sound, repeat interval, screen text and flash setting (Alerts tab). Your own buffs default to Normal; buffs other people give you and consumables default to Low, and their Sound tick starts off, so they stay quiet until you turn it on.
+
+## Running out
+
+With "When missing or running out", a buff stays hidden while you have it and appears when it is about to run out: buffs lasting 15 minutes or more at 5 minutes left, shorter ones at 1 minute left (both adjustable). Running-out icons get an amber border and a countdown. The countdown keeps going in combat from the end time the addon saw before the fight.
 
 ## Display styles
 
-- **Always-on grid** (default): every tracked buff stays on screen. Buffs you have are grey and dim; missing ones light up with a red border.
-- **Plain row**: only missing buffs, red border, nothing else.
-- **Flashing with names**: only missing buffs, pulsing, with the buff name beside each icon.
+- **Icons**: just the icons.
+- **Icons with names beside / below**: the buff name next to or under each icon.
 
 ## Consumables and recommendations
 
-Flask, elixir, Well Fed and weapon oil/stone reminders are shown inside raid instances, and anywhere once you have used one this session and it wears off. Both rules are toggles. The icon and tooltip name the item recommended for your class, role and level, or the one you picked in the Consumables tab. Any flask, elixir, food or weapon enhancement still counts as "have it".
+Each consumable group shows where you choose: everywhere, in dungeons and raids (the default for elixirs, food and weapon oils), in raids only (the default for flasks), or never. Once you have used one this session and it wears off, it is also reminded anywhere unless set to never. The icon and tooltip name the item recommended for your class, role and level, or your own pick. Any item in the group counts as "have it": the addon asks the game which buff each listed item gives, so new Forever items are recognised too.
+
+Data: Wowhead's Forever item and spell data and Method's Forever consumables list (November 2026). No class-by-class Forever consumable guides exist yet, so recommendations are inferred from what each item does.
 
 ## Combat
 
@@ -73,5 +78,7 @@ Tests run outside the game under Lua 5.1 via Python's `lupa` package:
 python -m pip install lupa
 python tests/run_tests.py
 ```
+
+Consumable sources and spell ranks are generated from `docs/superpowers/research/2026-11-08-sources-and-ranks.md` by `python tools/gen_data.py`, which writes `DataGen.lua`.
 
 New versions: commit to `main`, `git tag vX.Y.Z`, push the tag; GitHub Actions publishes the release zip.

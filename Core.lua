@@ -6,7 +6,7 @@ local Core = FB.Core
 -- Saved variables, events, hide rules, combat freeze, slash commands.
 -------------------------------------------------------------------------------
 
-Core.VERSION = "1.1.0"
+Core.VERSION = "1.2.0"
 Core.GRACE_SECONDS = 3
 Core.THROTTLE_SECONDS = 0.25
 Core.TICK_SECONDS = 1
@@ -513,6 +513,28 @@ local function cmdIds()
   end
 end
 
+local function cmdCatalogue()
+  say("catalogue items and the buff spell the game reports for them:")
+  local cats = { "elixir", "flask", "well_fed", "weapon" }
+  for _, cat in ipairs(cats) do
+    for _, r in ipairs(FB.Data.CATALOGUE[cat] or {}) do
+      local spell = r.resolvedSpell or FB.API.ItemSpell(r.itemID)
+      say(string.format("  %s %d %s -> %s", cat, r.itemID, r.name, spell and ("spell " .. spell) or "unresolved"))
+    end
+  end
+end
+
+local function cmdRanks()
+  say("rank spells (UNKNOWN = this client has no such spell):")
+  for _, entry in ipairs(FB.Data.entries) do
+    for _, ladder in ipairs(entry.ranks or {}) do
+      for _, sp in ipairs(ladder.spells) do
+        say(string.format("  %s rank %d lvl %d: %d -> %s", ladder.family, sp.rank, sp.level, sp.id, FB.API.SpellName(sp.id) or "UNKNOWN"))
+      end
+    end
+  end
+end
+
 local function cmdHelp()
   say("commands: /fbuffs [lock | unlock | test | reset | debug | api | ids | report | help]")
   say("  report: saves the api, ids and debug output to the addon's saved variables (then /reload)")
@@ -551,6 +573,8 @@ function Core.Slash(msg)
     captured("api", cmdApi, true)
     captured("ids", cmdIds, true)
     captured("debug", cmdDebug, true)
+    captured("catalogue", cmdCatalogue, true)
+    captured("ranks", cmdRanks, true)
     say("report saved. Type /reload now so it is written to disk.")
   elseif msg == "" then
     if FB.Options and FB.Options.Toggle then FB.Options.Toggle()

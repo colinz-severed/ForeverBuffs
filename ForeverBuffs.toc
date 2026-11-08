@@ -3,7 +3,7 @@
 ## Notes: Reminds you of missing self, group and consumable buffs.
 ## Author: colinzmulan
 ## X-Credits: Claude AI assisted
-## Version: 1.1.0
+## Version: 1.2.0
 ## X-Website: https://github.com/colinz-severed/ForeverBuffs
 ## X-BugReport: https://github.com/colinz-severed/ForeverBuffs/issues
 ## IconTexture: 135926
