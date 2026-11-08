@@ -17,21 +17,61 @@ Display.unlocked = false
 -------------------------------------------------------------------------------
 -- Layout (pure)
 -------------------------------------------------------------------------------
-function Display.LayoutPositions(count, size, spacing, direction, perRow)
+-- sizes: array of per-icon pixel sizes. Icons advance by their own size plus
+-- spacing; lines (rows for RIGHT/LEFT, columns for DOWN/UP) wrap after perRow
+-- and are pitched by the largest icon in the line. Horizontal lines align
+-- bottom edges; vertical lines align left edges. Offsets are from TOPLEFT.
+function Display.LayoutPositions(sizes, spacing, direction, perRow)
   local out = {}
-  local step = size + spacing
   perRow = math.max(1, perRow or 8)
-  for i = 1, count do
-    local along = (i - 1) % perRow
-    local across = math.floor((i - 1) / perRow)
-    local x, y
-    if direction == "LEFT" then x, y = -along * step, -across * step
-    elseif direction == "DOWN" then x, y = across * step, -along * step
-    elseif direction == "UP" then x, y = across * step, along * step
-    else x, y = along * step, -across * step end
-    out[i] = { x = x, y = y }
+  local horizontal = direction ~= "DOWN" and direction ~= "UP"
+  local count = #sizes
+  local lineOffset = 0          -- cumulative pitch of previous lines
+  local i = 1
+  while i <= count do
+    local last = math.min(i + perRow - 1, count)
+    local lineMax = 0
+    for j = i, last do lineMax = math.max(lineMax, sizes[j]) end
+    local along = 0
+    for j = i, last do
+      local size = sizes[j]
+      local x, y
+      if horizontal then
+        local baseline = -lineOffset - (lineMax - size)   -- bottom edges level
+        x = (direction == "LEFT") and -along or along
+        y = baseline
+      else
+        x = lineOffset
+        y = (direction == "UP") and along or -along
+      end
+      out[j] = { x = x, y = y }
+      along = along + size + spacing
+    end
+    lineOffset = lineOffset + lineMax + spacing
+    i = last + 1
   end
   return out
+end
+
+local SCALE_BY_PRIORITY = { high = "highScale", low = "lowScale" }
+function Display.IconSize(settings, priority)
+  local base = settings.iconSize or 40
+  local field = SCALE_BY_PRIORITY[priority]
+  local scale = field and settings[field] or 1
+  if field == "highScale" and not settings.highScale then scale = 1.15 end
+  if field == "lowScale" and not settings.lowScale then scale = 0.7 end
+  return math.floor(base * scale + 0.5)
+end
+
+local BORDER_HIGH = { 0.85, 0.65, 0.13, 1 }
+local function applyBorder(icon, priority)
+  local inset = (priority == "low") and 1 or 2
+  local c = (priority == "high") and BORDER_HIGH or BORDER_COLOR
+  icon.border:SetColorTexture(c[1], c[2], c[3], c[4])
+  icon.border:ClearAllPoints()
+  icon.border:SetPoint("TOPLEFT", icon, "TOPLEFT", -inset, inset)
+  icon.border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", inset, -inset)
+  icon.borderInset = inset
 end
 
 -------------------------------------------------------------------------------
@@ -59,7 +99,9 @@ local function onIconEnter(icon)
   end
   if entry and entry.consumable then
     local rec = state.Recommendation and state:Recommendation(key)
-    if rec then
+    if rec and rec.picked then
+      GameTooltip:AddLine("Your pick: " .. (FB.API.ItemName(rec.itemID) or rec.name), 1, 0.9, 0.5, true)
+    elseif rec then
       GameTooltip:AddLine("Recommended: " .. (FB.API.ItemName(rec.itemID) or rec.name), 0.6, 1, 0.6, true)
     else
       GameTooltip:AddLine("No recommendation at your level", 0.7, 0.7, 0.7, true)
@@ -110,7 +152,10 @@ local function createIcon(index)
   return icon
 end
 
+function Display.Invalidate() Display.lastSignature = nil end
+
 function Display.Init(settings)
+  Display.Invalidate()
   if Display.anchor then
     Display.ApplyPosition(settings.position)
     return Display.anchor
@@ -184,6 +229,26 @@ local function iconTexture(state, key)
   return FB.API.SpellIcon(state:IconSpell(key)) or FALLBACK_ICON
 end
 
+local function priorityOf(state, key)
+  if state.Priority then return state:Priority(key) end
+  return "normal"
+end
+
+-- A cheap string describing everything the frames depend on; equal strings
+-- mean Update can skip all frame work.
+local function signature(state, settings, opts, keys)
+  local parts = {
+    opts.hidden and "H" or "-", opts.unlocked and "U" or "-", opts.testMode and "T" or "-", state.stale and "S" or "-",
+    tostring(settings.style), tostring(settings.iconSize), tostring(settings.spacing), tostring(settings.direction),
+    tostring(settings.perRow), tostring(settings.showNames), tostring(settings.alertStyle),
+    tostring(settings.highScale), tostring(settings.lowScale), tostring(settings.revision or 0),
+  }
+  for _, key in ipairs(keys) do
+    parts[#parts + 1] = key .. ":" .. tostring(state.status[key]) .. ":" .. priorityOf(state, key) .. ":" .. tostring(iconTexture(state, key))
+  end
+  return table.concat(parts, "|")
+end
+
 function Display.Update(state, settings, opts)
   opts = opts or {}
   local anchor = Display.anchor or Display.Init(settings)
@@ -191,24 +256,35 @@ function Display.Update(state, settings, opts)
   Display.casters = opts.casters
   Display.unlocked = opts.unlocked == true
 
+  local style = settings.style or "grid"
+  local showAll = opts.unlocked or opts.testMode or style == "grid"
+  local keys = opts.hidden and {} or (showAll and state:TrackedKeys() or state:Missing())
+
+  local sig = signature(state, settings, opts, keys)
+  if sig == Display.lastSignature then return false end
+  Display.lastSignature = sig
+
   if opts.hidden then
     anchor:Hide()
-    return
+    return true
   end
   anchor:Show()
 
-  local style = settings.style or "grid"
-  local showAll = opts.unlocked or opts.testMode or style == "grid"
-  local keys = showAll and state:TrackedKeys() or state:Missing()
-  local size = settings.iconSize or 40
+  local base = settings.iconSize or 40
   local spacing = settings.spacing or 6
-  local positions = Display.LayoutPositions(#keys, size, spacing, settings.direction or "RIGHT", settings.perRow or 8)
+  local sizes, priorities = {}, {}
+  for i, key in ipairs(keys) do
+    priorities[i] = priorityOf(state, key)
+    sizes[i] = Display.IconSize(settings, priorities[i])
+  end
+  local positions = Display.LayoutPositions(sizes, spacing, settings.direction or "RIGHT", settings.perRow or 8)
 
-  local minX, minY, maxX, maxY = 0, 0, size, size
+  local minX, minY, maxX, maxY = 0, 0, base, base
   for i, key in ipairs(keys) do
     local icon = Display.icons[i]
     if not icon then icon = createIcon(i); Display.icons[i] = icon end
     icon.key = key
+    local size = sizes[i]
     icon:SetSize(size, size)
     icon:ClearAllPoints()
     local p = positions[i]
@@ -217,6 +293,7 @@ function Display.Update(state, settings, opts)
     minY, maxY = math.min(minY, p.y - size), math.max(maxY, p.y)
 
     icon.tex:SetTexture(iconTexture(state, key))
+    applyBorder(icon, priorities[i])
 
     local missing = opts.testMode or state.status[key] == "missing"
     if missing then
@@ -262,7 +339,7 @@ function Display.Update(state, settings, opts)
     icon:Hide()
   end
 
-  anchor:SetSize(math.max(size, maxX - minX), math.max(size, maxY - minY))
+  anchor:SetSize(math.max(base, maxX - minX), math.max(base, maxY - minY))
 
   if opts.unlocked then
     Display.backdrop:Show()
@@ -275,4 +352,5 @@ function Display.Update(state, settings, opts)
   end
 
   if state.stale then Display.badge:Show() else Display.badge:Hide() end
+  return true
 end
