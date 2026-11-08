@@ -294,3 +294,70 @@ function API.Probe()
   for _, path in ipairs(PROBED) do out[#out + 1] = { name = path, ok = resolve(path) ~= nil } end
   return out
 end
+
+-------------------------------------------------------------------------------
+-- 1.2: end times, weapon remaining time, item spells, screen text
+-------------------------------------------------------------------------------
+local function readable(v) return v ~= nil and not IsSecret(v) end
+
+-- expirationTime, duration of the player's aura, or nil when absent, errored,
+-- secret, or permanent (duration 0).
+function API.PlayerAuraTimes(id)
+  local ok, aura = playerAuraData(id)
+  if not ok or aura == nil then return nil end
+  local exp, dur = aura.expirationTime, aura.duration
+  if not readable(exp) or not readable(dur) then return nil end
+  if type(dur) ~= "number" or dur <= 0 or type(exp) ~= "number" or exp <= 0 then return nil end
+  return exp, dur
+end
+
+-- Seconds left on a weapon slot's enchant (temporary enchant or imbue), or nil.
+function API.WeaponRemaining(slot)
+  local fn = resolve("C_PaperDollInfo.GetTemporaryEnchantmentInfo")
+  if fn then
+    local ok, info = pcall(fn, slot)
+    if ok and type(info) == "table" and not IsSecret(info) then
+      local ms = info.remainingTimeMs
+      if readable(ms) and type(ms) == "number" then return ms / 1000 end
+    end
+  end
+  for _, e in ipairs(weaponEnchantList(slot) or {}) do
+    if type(e) == "table" and not IsSecret(e) and readable(e.hasEnchant) and e.hasEnchant == true then
+      local left = e.timeLeft
+      if readable(left) and type(left) == "number" then return left / 1000 end
+      return nil
+    end
+  end
+  return nil
+end
+
+-- The spell an item casts (for a consumable: the buff it gives), or nil.
+-- Requests item data when the client has not cached the item yet.
+API.ItemSpellPending = {}
+function API.ItemSpell(itemID)
+  local fn = resolve("C_Item.GetItemSpell")
+  if not fn then return nil end
+  local ok, _, spellID = pcall(fn, itemID)
+  if ok and readable(spellID) and type(spellID) == "number" then
+    API.ItemSpellPending[itemID] = nil
+    return spellID
+  end
+  local req = resolve("C_Item.RequestLoadItemDataByID")
+  if req then pcall(req, itemID); API.ItemSpellPending[itemID] = true end
+  return nil
+end
+
+-- A raid-warning style message in the middle of the screen.
+function API.ScreenText(text, r, g, b)
+  local add = resolve("RaidNotice_AddMessage")
+  if add and _G.RaidWarningFrame then
+    local ok = pcall(add, _G.RaidWarningFrame, text, { r = r or 1, g = g or 0.3, b = b or 0.1 })
+    if ok then return end
+  end
+  local frame = _G.UIErrorsFrame
+  if frame and frame.AddMessage then pcall(frame.AddMessage, frame, text, r or 1, g or 0.3, b or 0.1) end
+end
+
+for _, path in ipairs({ "C_Item.GetItemSpell", "C_Item.RequestLoadItemDataByID", "RaidNotice_AddMessage" }) do
+  PROBED[#PROBED + 1] = path
+end

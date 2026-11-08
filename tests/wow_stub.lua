@@ -158,6 +158,10 @@ function CreateFrame(kind, name, parent, template)
 end
 
 UISpecialFrames = {}
+RaidWarningFrame = { _name = "RaidWarningFrame" }
+function RaidNotice_AddMessage(frame, text, color) table.insert(STUB.raidNotices, { frame = frame, text = text, color = color }) end
+UIErrorsFrame = { AddMessage = function(self, text, r, g, b) table.insert(STUB.errorsFrame, { text = text, r = r, g = g, b = b }) end }
+ChatTypeInfo = { RAID_WARNING = { r = 1, g = 0.28, b = 0 } }
 BackdropTemplateMixin = {}
 GameFontNormal, GameFontHighlight, GameFontHighlightSmall, GameFontNormalSmall = {}, {}, {}, {}
 GameFontNormalLarge, GameFontDisableSmall, GameFontDisable, ChatFontNormal, GameFontHighlightLarge = {}, {}, {}, {}, {}
@@ -314,6 +318,9 @@ end
 
 function C_Item.GetWeaponEnchantInfo(weaponSlot) return STUB.weaponEnchants[weaponSlot] end
 
+function C_Item.GetItemSpell(id) local sid = STUB.itemSpells[id]; if not sid then return nil end; return "Spell" .. sid, sid end
+function C_Item.RequestLoadItemDataByID(id) STUB.itemRequests[#STUB.itemRequests + 1] = id end
+
 C_PaperDollInfo = {}
 function C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot) local e = STUB.tempEnchant[slot]; if e then return e end; return nil end
 
@@ -414,6 +421,10 @@ function STUB.reset()
   STUB.neverSecret = {}
   STUB.tempEnchant = {}
   STUB.weaponEnchants = {}
+  STUB.itemSpells = {}
+  STUB.itemRequests = {}
+  STUB.raidNotices = {}
+  STUB.errorsFrame = {}
   STUB.auraErrors = {}
   STUB.offhandItem = nil
   STUB.mainhandItem = nil
