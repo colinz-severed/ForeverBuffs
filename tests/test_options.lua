@@ -56,3 +56,16 @@ T.test("shaman and rogue see no weapon category", function()
   STUB.reload(function() STUB.player.class = "SHAMAN" end); STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
   FB.Options.Open(); FB.Options.Show("Consumables"); T.falsy(FB.Options.consumableHeaders.weapon); T.truthy(FB.Options.consumableHeaders.elixir)
 end)
+T.test("list row text is single-line and row-high", function()
+  STUB.reload(function() STUB.player.class = "MAGE" end); STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
+  FB.Options.Open(); FB.Options.Show("Consumables"); local r = FB.Options.consumableRows[21546]
+  T.eq(r.summary._wordWrap, false); T.eq(r.name._wordWrap, false); T.eq(r.summary:GetHeight(), 24)
+  FB.Options.Show("Buffs"); local b = FB.Options.buffRows.arcane_intellect; T.eq(b.name._wordWrap, false); T.eq(b.note._wordWrap, false)
+end)
+T.test("buffs tab note reflects the default priority the entry would get", function()
+  STUB.reload(function() STUB.player.class = "MAGE" end); STUB.fire("PLAYER_ENTERING_WORLD"); STUB.advance(3.5)
+  FB.Options.Open(); FB.Options.Show("Buffs")
+  T.eq(FB.Options.buffRows.fortitude.note:GetText(), "small, quiet")      -- from another class: Low by default, even with no priest around
+  T.eq(FB.Options.buffRows.arcane_intellect.note:GetText(), "alert style") -- own class buff: Normal by default
+  FB.cdb.priority.fortitude = "high"; FB.Options.RefreshBuffs(); T.eq(FB.Options.buffRows.fortitude.note:GetText(), "flash + sound")
+end)

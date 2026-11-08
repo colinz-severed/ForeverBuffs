@@ -131,3 +131,15 @@ T.test("TOC metadata", function()
   for _, line in ipairs({"## Version: 1.1.0", "## Author: colinzmulan", "## X-Credits: Claude AI assisted", "## AddonCompartmentFunc: ForeverBuffs_OpenOptions", "## X-BugReport: https://github.com/colinz-severed/ForeverBuffs/issues"}) do T.truthy(toc:find(line, 1, true), line) end
   T.truthy(toc:find("UI.lua\nOptions.lua", 1, true) or toc:find("UI.lua\r\nOptions.lua", 1, true))
 end)
+T.test("every 1.0 sound key migrates to a resolvable 1.1 key; unknown keys reset", function()
+  for _, legacy in ipairs({ "raid_warning", "ready_check", "alarm", "boss_whisper" }) do
+    STUB.reload(function() ForeverBuffsDB = { sound = legacy } end)
+    T.truthy(FB.Alerts.SoundByKey(FB.db.soundNormal), legacy .. " -> " .. tostring(FB.db.soundNormal))
+  end
+  STUB.reload(function() ForeverBuffsDB = { sound = "alarm" } end); T.eq(FB.db.soundNormal, "alarm3")
+  STUB.reload(function() ForeverBuffsDB = { settingsVersion = 2, soundNormal = "bogus", soundHigh = "bogus" } end)
+  T.eq(FB.db.soundNormal, "raid_warning"); T.eq(FB.db.soundHigh, "alarm3")
+end)
+T.test("options window is not built at login, only on demand", function()
+  STUB.reload(); T.eq(FB.Options.frame, nil); FB.Options.Toggle(); T.truthy(FB.Options.frame)
+end)

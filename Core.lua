@@ -78,18 +78,33 @@ local function copyDefaults(dst, src)
   return dst
 end
 
+-- 1.0 sound keys that 1.1 renamed.
+local LEGACY_SOUND_KEYS = { alarm = "alarm3" }
+
 -- Upgrades a saved-variables table written by an older version, in place.
 local function migrate(db)
   if db.settingsVersion == nil then
     -- 1.0 → 1.1: the single sound became the Normal-priority sound.
-    if db.sound ~= nil and db.soundNormal == nil then db.soundNormal = db.sound end
+    if db.sound ~= nil and db.soundNormal == nil then
+      db.soundNormal = LEGACY_SOUND_KEYS[db.sound] or db.sound
+    end
   end
   db.settingsVersion = Core.SETTINGS_VERSION
+end
+
+-- A sound key the current sound list does not know falls back to the default.
+local function validateSounds(db)
+  local byKey = FB.Alerts and FB.Alerts.SoundByKey
+  if not byKey then return end
+  for _, field in ipairs({ "soundNormal", "soundHigh" }) do
+    if db[field] ~= nil and not byKey(db[field]) then db[field] = Core.DEFAULTS[field] end
+  end
 end
 
 function Core.InitDB()
   local db = type(ForeverBuffsDB) == "table" and ForeverBuffsDB or {}
   migrate(db)
+  validateSounds(db)
   ForeverBuffsDB = copyDefaults(db, Core.DEFAULTS)
   ForeverBuffsCharDB = copyDefaults(type(ForeverBuffsCharDB) == "table" and ForeverBuffsCharDB or {}, Core.CHAR_DEFAULTS)
   FB.db = ForeverBuffsDB
@@ -294,7 +309,7 @@ local function onLogin()
   FB.Display.onMoved = function() FB.Display.SavePosition(FB.db) end
   Core.state = FB.State.New(FB.Data, Core.BuildEnv())
   Core.alerts = FB.Alerts.New()
-  if FB.Options and FB.Options.Build then FB.Options.Build() end
+  -- The options window is built on first open (/fbuffs), not at login.
 
   frame:RegisterEvent("PLAYER_ENTERING_WORLD")
   frame:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -369,8 +384,8 @@ local function cmdDebug()
   for _, key in ipairs(keys) do
     local t = s.tracked[key]
     local casters = Core.casters[key]
-    say(string.format("  %-18s %-10s %-8s %s%s", key, t.reason, tostring(s.status[key] or "unknown"),
-      t.quiet and "quiet " or "", casters and ("casters: " .. table.concat(casters, ", ")) or ""))
+    say(string.format("  %-18s %-10s %-8s %-6s %s", key, t.reason, tostring(s.status[key] or "unknown"),
+      s:Priority(key), casters and ("casters: " .. table.concat(casters, ", ")) or ""))
   end
 end
 

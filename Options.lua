@@ -332,16 +332,29 @@ local function entryIcon(entry)
   return (id and FB.API.SpellIcon(id)) or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
-local function effectivePriority(key)
-  local explicit = FB.cdb and FB.cdb.priority and FB.cdb.priority[key]
-  if explicit then return explicit end
-  if FB.Core and FB.Core.state then return FB.Core.state:Priority(key) end
-  return "normal"
-end
-
 local function knowsEntry(entry)
   for _, id in ipairs(entry.castIDs or {}) do if FB.API.KnowsSpell(id) then return true end end
   return false
+end
+
+-- The priority this entry has, or would have once tracked: explicit setting,
+-- else the default for its reason (own spell → normal, other class → low,
+-- consumable → low). Not state:Priority(), which says "normal" for anything
+-- not currently tracked.
+local function effectivePriority(entry)
+  local explicit = FB.cdb and FB.cdb.priority and FB.cdb.priority[entry.key]
+  if explicit then return explicit end
+  local reason
+  if entry.consumable then reason = "consumable"
+  elseif knowsEntry(entry) or entry.class == playerClass() then reason = "known"   -- own class: normal once learned
+  else reason = "group" end
+  return FB.Data.DefaultPriority(reason)
+end
+
+local function singleLine(fs, height)
+  fs:SetWordWrap(false)
+  fs:SetMaxLines(1)
+  fs:SetHeight(height)
 end
 
 local function buildBuffRow(parent)
@@ -365,7 +378,7 @@ local function buildBuffRow(parent)
   row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
   row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-  row.name:SetWidth(190); row.name:SetJustifyH("LEFT")
+  row.name:SetWidth(190); row.name:SetJustifyH("LEFT"); singleLine(row.name, 28)
   row.priority = UI.Dropdown(row, nil, choices(PRIORITY_CHOICES),
     function() return row.key and FB.cdb.priority[row.key] or "default" end,
     function(v)
@@ -378,6 +391,7 @@ local function buildBuffRow(parent)
   row.note = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.note:SetPoint("LEFT", row.priority, "RIGHT", 10, 0)
   row.note:SetTextColor(UI.COLORS.muted[1], UI.COLORS.muted[2], UI.COLORS.muted[3], 1)
+  singleLine(row.note, 28)
   return row
 end
 
@@ -401,7 +415,7 @@ local function fillBuffRow(row, item)
     row.note:SetText("learned at level " .. tostring(entry.learnLevel))
     row.name:SetTextColor(0.6, 0.6, 0.6, 1)
   else
-    row.note:SetText(PRIORITY_NOTE[effectivePriority(item.key)] or "")
+    row.note:SetText(PRIORITY_NOTE[effectivePriority(entry)] or "")
     row.name:SetTextColor(1, 1, 1, 1)
   end
   Options.buffRows[item.key] = row
@@ -510,13 +524,14 @@ local function buildConsumableRow(parent)
   row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
   row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-  row.name:SetWidth(230); row.name:SetJustifyH("LEFT")
+  row.name:SetWidth(200); row.name:SetJustifyH("LEFT"); singleLine(row.name, 24)
   row.summary = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.summary:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
-  row.summary:SetWidth(150); row.summary:SetJustifyH("LEFT")
+  row.summary:SetWidth(190); row.summary:SetJustifyH("LEFT"); singleLine(row.summary, 24)
   row.summary:SetTextColor(UI.COLORS.muted[1], UI.COLORS.muted[2], UI.COLORS.muted[3], 1)
   row.tag = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   row.tag:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+  singleLine(row.tag, 24)
   return row
 end
 

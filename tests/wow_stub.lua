@@ -141,7 +141,8 @@ function methods:SetClampedToScreen() end
 function methods:SetMultiLine() end
 function methods:SetMaxLetters() end
 function methods:SetTextInsets() end
-function methods:SetWordWrap() end
+function methods:SetWordWrap(b) self._wordWrap = b end
+function methods:SetMaxLines(n) self._maxLines = n end
 function methods:SetNonSpaceWrap() end
 function methods:GetStringWidth() return #tostring(self._text or "") * 6 end
 function methods:SetHitRectInsets() end
