@@ -144,3 +144,54 @@ T.test("tooltip says Your pick for picked consumables", function()
   FB.Display.Update(st, settings(), {}); local ic = shownIcons().weapon_mh; GameTooltip._lines = {}; ic:GetScript("OnEnter")(ic)
   T.truthy(GameTooltip._lines[1]:find("Your pick: Lesser Wizard Oil", 1, true))
 end)
+local function v12State(tracked, status, vis, rem)
+  local s = fakeState(tracked, status)
+  s.vis = vis or {}; s.rem = rem or {}
+  function s:Visibility(k) return self.vis[k] or "always" end
+  function s:Remaining(k, now) return self.rem[k] end
+  return s
+end
+local function v12settings(over) local s = settings(over); s.style = nil; s.look = s.look or "icons"; return s end
+T.test("visibility modes choose which keys show", function()
+  STUB.reset(); FB.Display.Init(v12settings())
+  local st = v12State({ inner_fire={}, fortitude={}, flask={} }, { inner_fire="present", fortitude="expiring", flask="missing" },
+    { inner_fire="always", fortitude="missing", flask="expiring" }, { fortitude=200 })
+  FB.Display.Update(st, v12settings(), {}); local shown, n = shownIcons()
+  T.eq(n, 2); T.truthy(shown.inner_fire); T.truthy(shown.flask); T.falsy(shown.fortitude)
+  st.vis.fortitude = "expiring"; FB.Display.Update(st, v12settings(), {}); shown, n = shownIcons(); T.eq(n, 3)
+  st.vis.inner_fire = "missing"; FB.Display.Update(st, v12settings(), { unlocked = true }); shown, n = shownIcons(); T.eq(n, 3)
+end)
+T.test("running-out icons have an amber border and a countdown", function()
+  STUB.reset(); FB.Display.Init(v12settings())
+  local st = v12State({ inner_fire={}, fortitude={} }, { inner_fire="expiring", fortitude="expiring" }, {}, { inner_fire=250, fortitude=45 })
+  FB.Display.Update(st, v12settings(), {}); local shown = shownIcons()
+  T.eq(shown.inner_fire.border.texture[1], 1); T.eq(shown.inner_fire.border.texture[2], 0.6); T.truthy(shown.inner_fire.border:IsShown())
+  T.eq(shown.inner_fire.timer:GetText(), "4m"); T.eq(shown.fortitude.timer:GetText(), "45s"); T.truthy(shown.fortitude.timer:IsShown())
+  T.eq(shown.inner_fire:GetAlpha(), 1)
+  st.rem.fortitude = 44; T.truthy(FB.Display.Update(st, v12settings(), {})); T.eq(shownIcons().fortitude.timer:GetText(), "44s")
+end)
+T.test("present icons have no timer", function()
+  STUB.reset(); FB.Display.Init(v12settings())
+  local st = v12State({ inner_fire={} }, { inner_fire="present" }, {}, { inner_fire=900 })
+  FB.Display.Update(st, v12settings(), {}); T.falsy(shownIcons().inner_fire.timer:IsShown())
+end)
+T.test("looks place names beside or below", function()
+  STUB.reset(); STUB.spells[1243] = { name="Power Word: Fortitude", icon=1 }; FB.Display.Init(v12settings())
+  local st = v12State({ fortitude={} }, { fortitude="missing" })
+  FB.Display.Update(st, v12settings({ look="names_beside" }), {}); local l = shownIcons().fortitude.label; T.truthy(l:IsShown()); T.eq((l:GetPoint()), "LEFT")
+  FB.Display.Update(st, v12settings({ look="names_below" }), {}); l = shownIcons().fortitude.label; T.eq((l:GetPoint()), "TOP")
+  FB.Display.Update(st, v12settings({ look="icons" }), {}); T.falsy(shownIcons().fortitude.label:IsShown())
+end)
+T.test("anchor bounds enclose icons exactly for every direction", function()
+  STUB.reset(); FB.Display.Init(v12settings())
+  local st = v12State({ inner_fire={}, fortitude={}, arcane_intellect={} }, { inner_fire="missing", fortitude="missing", arcane_intellect="missing" })
+  for _, dir in ipairs({ "RIGHT", "LEFT", "DOWN", "UP" }) do
+    FB.Display.Update(st, v12settings({ direction=dir }), {})
+    local minX, maxY, maxX, minY = math.huge, -math.huge, -math.huge, math.huge
+    for _, ic in ipairs(FB.Display.icons) do if ic:IsShown() then
+      local _, _, _, x, y = ic:GetPoint(); minX = math.min(minX, x); maxY = math.max(maxY, y); maxX = math.max(maxX, x + ic:GetWidth()); minY = math.min(minY, y - ic:GetHeight())
+    end end
+    T.eq(minX, 0, dir .. " minX"); T.eq(maxY, 0, dir .. " maxY")
+    T.eq(FB.Display.anchor:GetWidth(), maxX - minX, dir .. " width"); T.eq(FB.Display.anchor:GetHeight(), maxY - minY, dir .. " height")
+  end
+end)

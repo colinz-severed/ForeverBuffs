@@ -64,9 +64,11 @@ function Display.IconSize(settings, priority)
 end
 
 local BORDER_HIGH = { 0.85, 0.65, 0.13, 1 }
-local function applyBorder(icon, priority)
+local BORDER_EXPIRING = { 1, 0.6, 0.1, 1 }
+local function applyBorder(icon, priority, status)
   local inset = (priority == "low") and 1 or 2
   local c = (priority == "high") and BORDER_HIGH or BORDER_COLOR
+  if status == "expiring" then c = BORDER_EXPIRING end
   icon.border:SetColorTexture(c[1], c[2], c[3], c[4])
   icon.border:ClearAllPoints()
   icon.border:SetPoint("TOPLEFT", icon, "TOPLEFT", -inset, inset)
@@ -77,7 +79,6 @@ end
 -------------------------------------------------------------------------------
 -- Frames
 -------------------------------------------------------------------------------
-local function styleHasFlash(style) return style == "flash" or style == "both" end
 
 local function entryDisplayName(state, key)
   local entry = FB.Data.byKey[key]
@@ -140,6 +141,10 @@ local function createIcon(index)
 
   icon.label = icon:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   icon.label:Hide()
+
+  icon.timer = icon:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  icon.timer:SetPoint("BOTTOM", icon, "BOTTOM", 0, 1)
+  icon.timer:Hide()
 
   icon.pulse = icon:CreateAnimationGroup()
   icon.pulse:SetLooping("BOUNCE")
@@ -236,15 +241,61 @@ end
 
 -- A cheap string describing everything the frames depend on; equal strings
 -- mean Update can skip all frame work.
-local function signature(state, settings, opts, keys)
+-- Countdown text for a running-out icon: "4m" from a minute up, else "45s".
+function Display.FormatTimer(seconds)
+  if not seconds then return nil end
+  if seconds >= 60 then return string.format("%dm", math.floor(seconds / 60)) end
+  return string.format("%ds", math.floor(seconds))
+end
+
+-- Look: 1.2 setting, else derived from 1.1's style / showNames.
+local function lookOf(settings)
+  if settings.look then return settings.look end
+  if settings.style == "names" then return "names_beside" end
+  if settings.showNames then return "names_below" end
+  return "icons"
+end
+
+-- Visibility of one key: the state's per-entry/global mode, else from 1.1's style.
+local function visibilityOf(state, settings, key)
+  if state.Visibility then return state:Visibility(key) end
+  if settings.visibility then return settings.visibility end
+  if settings.style == nil or settings.style == "grid" then return "always" end
+  return "missing"
+end
+
+local function visibleKeys(state, settings, opts)
+  if opts.hidden then return {} end
+  local out = {}
+  for _, key in ipairs(state:TrackedKeys()) do
+    local status = state.status[key]
+    local show
+    if opts.unlocked or opts.testMode then show = true
+    else
+      local mode = visibilityOf(state, settings, key)
+      if mode == "always" then show = true
+      elseif mode == "expiring" then show = (status == "missing" or status == "expiring")
+      else show = (status == "missing") end
+    end
+    if show then out[#out + 1] = key end
+  end
+  return out
+end
+
+local function timerText(state, key)
+  if state.status[key] ~= "expiring" or not state.Remaining then return nil end
+  return Display.FormatTimer(state:Remaining(key, GetTime()))
+end
+
+local function signature(state, settings, opts, keys, textures, timers)
   local parts = {
     opts.hidden and "H" or "-", opts.unlocked and "U" or "-", opts.testMode and "T" or "-", state.stale and "S" or "-",
-    tostring(settings.style), tostring(settings.iconSize), tostring(settings.spacing), tostring(settings.direction),
-    tostring(settings.perRow), tostring(settings.showNames), tostring(settings.alertStyle),
-    tostring(settings.highScale), tostring(settings.lowScale), tostring(settings.revision or 0),
+    lookOf(settings), tostring(settings.iconSize), tostring(settings.spacing), tostring(settings.direction),
+    tostring(settings.perRow), tostring(settings.highScale), tostring(settings.lowScale), tostring(settings.revision or 0),
   }
-  for _, key in ipairs(keys) do
-    parts[#parts + 1] = key .. ":" .. tostring(state.status[key]) .. ":" .. priorityOf(state, key) .. ":" .. tostring(iconTexture(state, key))
+  for i, key in ipairs(keys) do
+    parts[#parts + 1] = key .. ":" .. tostring(state.status[key]) .. ":" .. priorityOf(state, key) .. ":"
+      .. tostring(textures[i]) .. ":" .. tostring(timers[i])
   end
   return table.concat(parts, "|")
 end
@@ -256,11 +307,15 @@ function Display.Update(state, settings, opts)
   Display.casters = opts.casters
   Display.unlocked = opts.unlocked == true
 
-  local style = settings.style or "grid"
-  local showAll = opts.unlocked or opts.testMode or style == "grid"
-  local keys = opts.hidden and {} or (showAll and state:TrackedKeys() or state:Missing())
+  local look = lookOf(settings)
+  local keys = visibleKeys(state, settings, opts)
+  local textures, timers = {}, {}
+  for i, key in ipairs(keys) do
+    textures[i] = iconTexture(state, key)
+    timers[i] = timerText(state, key)
+  end
 
-  local sig = signature(state, settings, opts, keys)
+  local sig = signature(state, settings, opts, keys, textures, timers)
   if sig == Display.lastSignature then return false end
   Display.lastSignature = sig
 
@@ -279,7 +334,18 @@ function Display.Update(state, settings, opts)
   end
   local positions = Display.LayoutPositions(sizes, spacing, settings.direction or "RIGHT", settings.perRow or 8)
 
-  local minX, minY, maxX, maxY = 0, 0, base, base
+  -- Exact bounds; shift so the anchor's TOPLEFT is the icons' top-left for
+  -- every grow direction.
+  local minX, maxY, maxX, minY = 0, 0, 0, 0
+  if #keys > 0 then
+    minX, maxY, maxX, minY = math.huge, -math.huge, -math.huge, math.huge
+    for i, p in ipairs(positions) do
+      minX = math.min(minX, p.x); maxX = math.max(maxX, p.x + sizes[i])
+      maxY = math.max(maxY, p.y); minY = math.min(minY, p.y - sizes[i])
+    end
+  end
+
+  local channels = settings.alert or (FB.db and FB.db.alert)
   for i, key in ipairs(keys) do
     local icon = Display.icons[i]
     if not icon then icon = createIcon(i); Display.icons[i] = icon end
@@ -288,15 +354,13 @@ function Display.Update(state, settings, opts)
     icon:SetSize(size, size)
     icon:ClearAllPoints()
     local p = positions[i]
-    icon:SetPoint("TOPLEFT", anchor, "TOPLEFT", p.x, p.y)
-    minX, maxX = math.min(minX, p.x), math.max(maxX, p.x + size)
-    minY, maxY = math.min(minY, p.y - size), math.max(maxY, p.y)
+    icon:SetPoint("TOPLEFT", anchor, "TOPLEFT", p.x - minX, p.y - maxY)
 
-    icon.tex:SetTexture(iconTexture(state, key))
-    applyBorder(icon, priorities[i])
+    icon.tex:SetTexture(textures[i])
+    local status = opts.testMode and "missing" or state.status[key]
+    applyBorder(icon, priorities[i], status)
 
-    local missing = opts.testMode or state.status[key] == "missing"
-    if missing then
+    if status == "missing" or status == "expiring" then
       icon.tex:SetDesaturated(false)
       icon:SetAlpha(1)
       icon.border:Show()
@@ -306,23 +370,31 @@ function Display.Update(state, settings, opts)
       icon.border:Hide()
     end
 
-    -- The "names" style is "flashing with names": it pulses missing icons
-    -- whatever the alert style; other styles follow the alert style.
+    if timers[i] and not opts.testMode then
+      icon.timer:SetText(timers[i]); icon.timer:Show()
+    else
+      icon.timer:Hide()
+    end
+
     local flash
-    if opts.testMode then flash = styleHasFlash(settings.alertStyle) or style == "names"
-    else flash = FB.Alerts.ShouldFlash(state, key, settings.alertStyle, style) end
+    if opts.testMode then
+      local c = channels and channels[priorities[i]]
+      flash = c and c.flash == true
+    else
+      flash = FB.Alerts.ShouldFlash(state, key, channels)
+    end
     if flash then
       if not icon.pulse:IsPlaying() then icon.pulse:Play() end
     else
       if icon.pulse:IsPlaying() then icon.pulse:Stop() end
     end
 
-    if style == "names" then
+    if look == "names_beside" then
       icon.label:ClearAllPoints()
       icon.label:SetPoint("LEFT", icon, "RIGHT", 4, 0)
       icon.label:SetText(entryDisplayName(state, key))
       icon.label:Show()
-    elseif settings.showNames then
+    elseif look == "names_below" then
       icon.label:ClearAllPoints()
       icon.label:SetPoint("TOP", icon, "BOTTOM", 0, -2)
       icon.label:SetText(entryDisplayName(state, key))
@@ -339,7 +411,11 @@ function Display.Update(state, settings, opts)
     icon:Hide()
   end
 
-  anchor:SetSize(math.max(base, maxX - minX), math.max(base, maxY - minY))
+  if #keys > 0 then
+    anchor:SetSize(maxX - minX, maxY - minY)
+  else
+    anchor:SetSize(base, base)
+  end
 
   if opts.unlocked then
     Display.backdrop:Show()
